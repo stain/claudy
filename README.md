@@ -119,6 +119,23 @@ Add it in GitLab as a **deploy key** for that one repository (*Settings → Repo
 
 On **GitHub** do the same under the repository's *Settings → Deploy keys* (tick *Allow write access* only if Claude should push). GitHub accepts a given deploy key on one repository only, and refuses a key that is already attached to a user account. Check it works with `ssh -T git@github.com` (it should greet the repository, e.g. `Hi owner/repo!`) and use an SSH remote (`git remote set-url origin git@github.com:owner/repo.git`) rather than `https://`.
 
+### Checking out a repository
+
+Start in an **empty folder** and clone from inside `claudy` over SSH, so no HTTPS password or token is ever typed into (or stored by) the container:
+
+```bash
+mkdir my-project && cd my-project
+claudy bash                      # first start prints the project's public key
+# add the key as a deploy key (see above), then inside the container:
+git clone git@github.com:owner/repo.git .     # or git@gitlab.com:group/repo.git .
+```
+
+Notes:
+
+* The key is tied to the folder's path, so clone into `.` (the folder you started `claudy` in) and don't move or rename the folder afterwards, or it gets a new key and the deploy key must be re-added.
+* If you cloned with `https://` elsewhere, switch it with `git remote set-url origin git@host:owner/repo.git`. Don't enter HTTPS credentials in the container: a stored password or token would be readable by Claude and usable on every repository your account can reach.
+* `git clone` refuses a non-empty folder; that is why the empty folder comes first.
+
 Deploy keys only give git access. They cannot open merge/pull requests or issues through an API.
 
 Notes:
