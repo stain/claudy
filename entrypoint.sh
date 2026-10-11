@@ -30,4 +30,16 @@ if [ -f "$YML" ]; then
     fi
 fi
 
+# Keep the env out of git without touching the project's .gitignore: '*' also
+# ignores this file itself. Written after create/update, which want a clean dir.
+if [ -d "$ENV_DIR/conda-meta" ]; then
+    printf '*\n' > "$ENV_DIR/.gitignore"
+    # Activate (CONDA_PREFIX, activate.d hooks); the exec'd command inherits it.
+    # Activation scripts are not written for set -u.
+    set +u
+    eval "$(conda shell.bash hook)"
+    conda activate "$ENV_DIR"
+    set -u
+fi
+
 exec "$@"

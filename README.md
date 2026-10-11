@@ -93,7 +93,8 @@ The project's conda environment (`/workspace/.conda_env/bin`) is on `PATH` for e
 
 * creates `.conda_env/` if it does not exist;
 * runs `conda env update --prune` if `environment.yml` is newer than the environment;
-* otherwise does nothing.
+* otherwise does nothing;
+* writes `.conda_env/.gitignore` (containing `*`) so the environment is never committed, and activates the environment for the command it starts.
 
 The image uses Miniforge (conda-forge). Do not add the Anaconda `defaults` channel: it requires accepting Anaconda's Terms of Service and is subject to its organisational licensing terms. Use:
 
@@ -103,7 +104,7 @@ channels:
   - bioconda
 ```
 
-Add `.conda_env/` to the project's `.gitignore`.
+The environment is ignored by git automatically; no entry in the project's `.gitignore` is needed.
 
 ## Git, GitLab and GitHub (SSH)
 
