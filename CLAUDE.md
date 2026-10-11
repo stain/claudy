@@ -8,7 +8,6 @@ Podman image + launcher for running Claude Code, Snakemake and Jupyter on WSL2 w
 - `entrypoint.sh`: runs inside the container on every start. Creates/updates `/workspace/.conda_env` from `/workspace/environment.yml`, then `exec "$@"`. A stamp file (`.conda_env/.environment.yml.stamp`) records the last successful create/update; a failed create removes the half-built env.
 - `claude-box`: **runs on the host**, not in the container. Wraps `podman run -it --rm`, mounts `$PWD` → `/workspace` and the config volume → `/claude-config`. `claude-box jupyter` publishes `127.0.0.1:8888`.
 - `environment.yml`: example/test project env. Per the README, real projects carry their own.
-- `.devcontainer/`: stale. References `docker-compose.yml` and `setup-env.sh`, neither of which exists, and the README advises against Dev Containers. Don't build on it.
 
 ## Security model (do not weaken)
 
@@ -26,9 +25,13 @@ Podman image + launcher for running Claude Code, Snakemake and Jupyter on WSL2 w
 - Scripts use `set -euo pipefail` and bash arrays for argument lists; keep that style.
 - `.conda_env/` and `*:Zone.Identifier` (Windows download metadata) are gitignored.
 
-## Known follow-ups
+## Future work
 
-- `Dockerfile`: Miniforge `latest` and Claude Code from npm are unpinned, so builds aren't reproducible. The Miniforge URL is hard-coded to x86_64.
-- `claude-box`: refuses `/`, `$HOME`, `/mnt/c` and `/mnt/c/Users/*`, but not other drives (`/mnt/d`), `/mnt/c/` subfolders outside `Users`, or ancestors of `$HOME` (e.g. `/home`). `-it` fails when stdin isn't a TTY (scripts, pipes).
-- `claude-box jupyter` needs `notebook` in the project's `environment.yml`; the base image has no Jupyter.
-- Possible hardening: `--cap-drop=ALL --security-opt=no-new-privileges` on `podman run` (check that conda and npm still work).
+Not yet done. Changes to `claude-box` and `Dockerfile` need the user's review (see trust boundary above).
+
+1. **`claude-box` hardening**
+   - The `$PWD` guard refuses only `/`, `$HOME`, `/mnt/c` and `/mnt/c/Users/*`. Extend it to every Windows drive and every path under it (`/mnt/[a-z]`, `/mnt/[a-z]/*`) and to ancestors of `$HOME` (e.g. `/home`).
+   - `-it` fails when stdin isn't a TTY (scripts, pipes). Add `-t` only when `[ -t 0 ]`.
+   - Consider `--cap-drop=ALL --security-opt=no-new-privileges` on `podman run`; check that conda env creation and npm still work.
+2. **Reproducible `Dockerfile`**: pin Miniforge to a release instead of `latest`, and pin `@anthropic-ai/claude-code` (e.g. via a build arg). The Miniforge URL is hard-coded to x86_64; derive the architecture with `uname -m` if ARM support is wanted.
+3. **Jupyter dependency**: `claude-box jupyter` needs `notebook` in the project's `environment.yml`; the base image has no Jupyter. At least document this in the README, or print a clear error when `jupyter` isn't on `PATH`.
