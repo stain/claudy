@@ -1,6 +1,6 @@
 # Claude Code sandbox (Podman on WSL2)
 
-A container image for running Claude Code, Snakemake and Jupyter where only the current project folder is visible to the container. Claude authenticates with your Claude Team (BioFAIR) subscription login; no API key is needed.
+A container image for running Claude Code, Snakemake and Jupyter where only the current project folder is visible to the container. Claude authenticates with your Claude Team subscription login; no API key is needed.
 
 ## Layout
 
