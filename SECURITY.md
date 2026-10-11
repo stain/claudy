@@ -24,7 +24,7 @@ It is not designed to stop a determined attacker with a kernel exploit, to keep 
 Network access is unrestricted. Anything the container can read (the project, the SSH key, the Claude login) can be sent anywhere by Claude or by code it runs, for instance after a prompt injection. Project content is also sent to Anthropic as part of normal use. **Do not use this for data that must not leave the machine** (Trusted Research Environment data, patient data, data under a no-transfer agreement).
 
 ### The Claude login is exposed to the container
-The subscription login lives in the `claude-config` volume, readable by everything in the container. The volume is shared by all projects, so it also holds other projects' transcripts. A compromised session could take the token and use your BioFAIR quota. Use `CLAUDY_CONFIG=claude-config-<project>` for separation (one login per project), and log out with `podman volume rm claude-config`.
+The subscription login lives in the `claude-config` volume, readable by everything in the container. The volume is shared by all projects, so it also holds other projects' transcripts. A compromised session could take the token and use your quota. Use `CLAUDY_CONFIG=claude-config-<project>` for separation (one login per project), and log out with `podman volume rm claude-config`.
 
 ### The project folder is writable and trusted by you later
 Claude can change anything in `/workspace`: scripts, `Makefile`, notebooks, `.git/hooks`, `environment.yml`, IDE settings. If you later run or open those *outside* the container (a git hook, `make`, a Jupyter notebook on the host, VS Code tasks), the sandbox no longer applies. Review changes (`git diff`, including hooks) before running anything outside.

@@ -247,5 +247,5 @@ Limits of this isolation:
 ## Troubleshooting
 
 * **`claude: command not found` / conda errors on start**: check the entrypoint output; a failed `conda env create` stops the container. Delete `.conda_env/` to start from scratch.
-* **The BioFAIR organisation is not offered at login**: check on claude.ai that the browser is signed in with the email the BioFAIR admin invited, and that the invitation has been accepted.
+* **The organisation is not offered at login**: check on claude.ai that the browser is signed in with the email the BioFAIR admin invited, and that the invitation has been accepted.
 * **Port 8888 already in use**: another `claudy jupyter` is running; stop it or change the host port in the `claudy` script.
