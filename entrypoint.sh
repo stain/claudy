@@ -12,7 +12,7 @@ STAMP="$ENV_DIR/.environment.yml.stamp"
 SSH_DIR=/root/.ssh
 if [ -d "$SSH_DIR" ] && [ ! -f "$SSH_DIR/id_ed25519" ]; then
     chmod 700 "$SSH_DIR"
-    ssh-keygen -q -t ed25519 -N "" -C "claude-box:${CLAUDE_BOX_PROJECT:-unknown}" -f "$SSH_DIR/id_ed25519"
+    ssh-keygen -q -t ed25519 -N "" -C "claudy:${CLAUDY_PROJECT:-unknown}" -f "$SSH_DIR/id_ed25519"
     echo "Generated a new SSH key for this project. Public key (add as a GitLab deploy key):" >&2
     cat "$SSH_DIR/id_ed25519.pub" >&2
 fi

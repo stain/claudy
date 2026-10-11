@@ -7,8 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Optional nested containers (podman inside the sandbox). Off by default: it is only useful
-# together with `CLAUDE_BOX_NESTED=1`, which gives the container /dev/fuse (see README).
-#   podman build --build-arg WITH_PODMAN=1 -t claude-sandbox-nested .
+# together with `CLAUDY_NESTED=1`, which gives the container /dev/fuse (see README).
+#   podman build --build-arg WITH_PODMAN=1 -t claudy-nested .
 ARG WITH_PODMAN=0
 RUN if [ "$WITH_PODMAN" = 1 ]; then \
       apt-get update && apt-get install -y --no-install-recommends \
@@ -33,18 +33,18 @@ ENV PATH=/workspace/.conda_env/bin:$CONDA_DIR/bin:$PATH
 
 RUN npm install -g @anthropic-ai/claude-code
 
-# Commit identity. Override per run with CLAUDE_BOX_GIT_NAME / CLAUDE_BOX_GIT_EMAIL (see claude-box)
+# Commit identity. Override per run with CLAUDY_GIT_NAME / CLAUDY_GIT_EMAIL (see claudy)
 ENV GIT_AUTHOR_NAME="Claude Sandbox" \
     GIT_AUTHOR_EMAIL="claude-sandbox@localhost" \
     GIT_COMMITTER_NAME="Claude Sandbox" \
     GIT_COMMITTER_EMAIL="claude-sandbox@localhost"
 RUN git config --system --add safe.directory /workspace
 
-# SSH: the per-project key lives in a volume mounted at /root/.ssh (see claude-box, entrypoint.sh).
+# SSH: the per-project key lives in a volume mounted at /root/.ssh (see claudy, entrypoint.sh).
 # Only that key is offered; unknown hosts are recorded on first contact.
 RUN mkdir -p /etc/ssh/ssh_config.d \
  && printf 'Host *\n  IdentityFile ~/.ssh/id_ed25519\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' \
-      > /etc/ssh/ssh_config.d/claude-box.conf
+      > /etc/ssh/ssh_config.d/claudy.conf
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
