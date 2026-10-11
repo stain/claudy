@@ -5,13 +5,13 @@ Podman image + launcher for running Claude Code, Snakemake and Jupyter on WSL2 w
 ## Files
 
 - `Dockerfile`: `node:22-slim` + Miniforge (conda-forge only) + `@anthropic-ai/claude-code` via npm. `PATH` puts `/workspace/.conda_env/bin` first. `CLAUDE_CONFIG_DIR=/claude-config` (named volume holding the login).
-- `entrypoint.sh`: runs inside the container on every start. Creates/updates `/workspace/.conda_env` from `/workspace/environment.yml`, then `exec "$@"`. A stamp file (`.conda_env/.environment.yml.stamp`) records the last successful create/update; a failed create removes the half-built env.
-- `claude-box`: **runs on the host**, not in the container. Wraps `podman run -it --rm`, mounts `$PWD` → `/workspace` and the config volume → `/claude-config`. `claude-box jupyter` publishes `127.0.0.1:8888`.
+- `entrypoint.sh`: runs inside the container on every start. Generates the per-project ed25519 key on first use (printing the public key), then Creates/updates `/workspace/.conda_env` from `/workspace/environment.yml`, then `exec "$@"`. A stamp file (`.conda_env/.environment.yml.stamp`) records the last successful create/update; a failed create removes the half-built env.
+- `claude-box`: **runs on the host**, not in the container. Wraps `podman run -it --rm`, mounts `$PWD` → `/workspace`, the config volume → `/claude-config` and a per-project SSH volume → `/root/.ssh`. Also handles `pubkey` and `CLAUDE_BOX_GIT_NAME/EMAIL`. `claude-box jupyter` publishes `127.0.0.1:8888`.
 - `environment.yml`: example/test project env. Per the README, real projects carry their own.
 
 ## Security model (do not weaken)
 
-- The container sees only `/workspace` and `/claude-config`. No SSH keys, git credentials, Windows drives or extra mounts. Don't add `-v`, `--privileged`, host networking, or port bindings on `0.0.0.0`.
+- The container sees only `/workspace` and `/claude-config`. No host SSH keys, git credentials, Windows drives or extra mounts. The only mounts are `$PWD`, the config volume and the per-project SSH volume (one key per project, used as a GitLab *deploy key*; never mount host `~/.ssh` or an agent socket). Don't add other `-v`, `--privileged`, host networking, or port bindings on `0.0.0.0`.
 - Ports bind to `127.0.0.1` only.
 - Conda channels: `conda-forge` and `bioconda` only. Never add Anaconda `defaults` (ToS/licensing).
 - Never set or rely on `ANTHROPIC_API_KEY`; auth is the Claude Team (BioFAIR) subscription login stored in the volume.
@@ -29,6 +29,7 @@ Podman image + launcher for running Claude Code, Snakemake and Jupyter on WSL2 w
 
 Not yet done. Changes to `claude-box` and `Dockerfile` need the user's review (see trust boundary above).
 
+0. **Untested:** the `Dockerfile` (new packages, git identity, ssh config) and the SSH key generation in `entrypoint.sh` could not be run from inside the container; verify after `podman build` that `git commit` and `claude-box pubkey` work.
 1. **`claude-box` hardening**
    - The `$PWD` guard refuses only `/`, `$HOME`, `/mnt/c` and `/mnt/c/Users/*`. Extend it to every Windows drive and every path under it (`/mnt/[a-z]`, `/mnt/[a-z]/*`) and to ancestors of `$HOME` (e.g. `/home`).
    - `-it` fails when stdin isn't a TTY (scripts, pipes). Add `-t` only when `[ -t 0 ]`.

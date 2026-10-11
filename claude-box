@@ -3,6 +3,7 @@
 #   claude-box               Claude Code
 #   claude-box <cmd> [args]  any command, e.g. bash, snakemake --cores 4
 #   claude-box jupyter       Jupyter Notebook on http://localhost:8888
+#   claude-box pubkey        print this project's SSH public key
 set -euo pipefail
 
 IMAGE=${CLAUDE_BOX_IMAGE:-claude-sandbox}
@@ -14,7 +15,29 @@ case "$PWD" in
     exit 1 ;;
 esac
 
-opts=(-it --rm -v "$PWD":/workspace -v "$CONFIG_VOLUME":/claude-config)
+# One SSH key volume per project folder, so containers can't use each other's keys.
+# The hash of the full path keeps same-named folders apart.
+project=$(basename "$PWD")
+hash=$(printf '%s' "$PWD" | sha256sum | cut -c1-8)
+SSH_VOLUME=${CLAUDE_BOX_SSH:-claude-ssh-${project//[^A-Za-z0-9_.-]/_}-$hash}
+
+opts=(-it --rm
+  -v "$PWD":/workspace
+  -v "$CONFIG_VOLUME":/claude-config
+  -v "$SSH_VOLUME":/root/.ssh
+  -e CLAUDE_BOX_PROJECT="$project")
+
+# Optional commit identity (defaults come from the image)
+if [ -n "${CLAUDE_BOX_GIT_NAME:-}" ]; then
+  opts+=(-e GIT_AUTHOR_NAME="$CLAUDE_BOX_GIT_NAME" -e GIT_COMMITTER_NAME="$CLAUDE_BOX_GIT_NAME")
+fi
+if [ -n "${CLAUDE_BOX_GIT_EMAIL:-}" ]; then
+  opts+=(-e GIT_AUTHOR_EMAIL="$CLAUDE_BOX_GIT_EMAIL" -e GIT_COMMITTER_EMAIL="$CLAUDE_BOX_GIT_EMAIL")
+fi
+
+if [ "${1:-}" = pubkey ]; then
+  set -- cat /root/.ssh/id_ed25519.pub
+fi
 
 if [ "${1:-}" = jupyter ]; then
   opts+=(-p 127.0.0.1:8888:8888)

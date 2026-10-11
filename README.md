@@ -33,6 +33,8 @@ cd ~/claude-sandbox
 podman build -t claude-sandbox .
 ```
 
+The `Dockerfile` uses a fully qualified base image (`docker.io/library/node:22-slim`), so Podman needs no registry configuration. The build installs git, ssh, jq, zip/unzip, patch, build tools and an editor alongside Claude Code and Miniforge, and takes a few minutes the first time.
+
 ### 2. Install the launcher script
 
 Link `claude-box` into `~/bin`, so it stays in sync with this repository:
@@ -76,6 +78,7 @@ From any project folder:
 claude-box                       # Claude Code
 claude-box bash                  # a shell in the same environment
 claude-box snakemake --cores 4   # any command
+claude-box pubkey                # this project's SSH public key
 claude-box jupyter               # Jupyter on http://localhost:8888 (use the token URL it prints)
 ```
 
@@ -99,6 +102,28 @@ channels:
 
 Add `.conda_env/` to the project's `.gitignore`.
 
+## Git and GitLab (SSH)
+
+Your own SSH keys and git credentials are never visible to the container. Instead, each project folder gets **its own SSH key**, stored in a per-project Podman volume (`claude-ssh-<folder>-<hash>`, mounted at `/root/.ssh`). Containers for different projects cannot see each other's keys.
+
+The key is generated on the first start and its public key is printed. To show it again:
+
+```bash
+claude-box pubkey
+```
+
+Add it in GitLab as a **deploy key** for that one repository (*Settings → Repository → Deploy keys*), with *Grant write permissions* only if Claude should push. Do not add it to your user account: a user key would give the container access to every repository you can reach.
+
+Notes:
+
+* The private key is readable by anything running in the container, including Claude. A write-enabled deploy key lets Claude push to that repository, so protect important branches in GitLab.
+* The key has no passphrase, and no SSH agent is forwarded.
+* Host keys are recorded on first contact (`StrictHostKeyChecking accept-new`) and kept in the same volume. For a self-hosted GitLab this works the same way.
+* To revoke: delete the deploy key in GitLab, and `podman volume rm` the volume (`podman volume ls` lists them). Removing it makes the next start generate a new key.
+* Commits are authored as `Claude Sandbox <claude-sandbox@localhost>` by default. Override per run:
+  `CLAUDE_BOX_GIT_NAME="Your Name" CLAUDE_BOX_GIT_EMAIL=you@biofair.uk claude-box`.
+  To change the default, edit the `GIT_*` variables in the `Dockerfile` and rebuild.
+
 ## Updating Claude Code
 
 Claude Code is installed when the image is built. Updates made at runtime are lost with `--rm`, so rebuild periodically:
@@ -115,9 +140,10 @@ Your login is kept, as it lives in the `claude-config` volume.
 What the container can see:
 
 * `/workspace`: the folder you started it from, read-write.
+* `/root/.ssh`: this project's own SSH key volume (see above).
 * `/claude-config`: Claude Code's credentials, settings and session history. This volume is shared across projects, so it also holds transcripts from other projects. For strict separation between projects, run `CLAUDE_BOX_CONFIG="claude-config-$(basename "$PWD")" claude-box`, at the cost of logging in once per project.
 
-What it cannot see: the rest of the WSL filesystem, the Windows drives, your SSH keys and your git credentials.
+What it cannot see: the rest of the WSL filesystem, the Windows drives, your personal SSH keys and your git credentials, and other projects' SSH keys.
 
 Limits of this isolation:
 
