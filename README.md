@@ -105,7 +105,7 @@ channels:
 
 Add `.conda_env/` to the project's `.gitignore`.
 
-## Git and GitLab (SSH)
+## Git, GitLab and GitHub (SSH)
 
 Your own SSH keys and git credentials are never visible to the container. Instead, each project folder gets **its own SSH key**, stored in a per-project Podman volume (`claude-ssh-<folder>-<hash>`, mounted at `/root/.ssh`). Containers for different projects cannot see each other's keys.
 
@@ -116,6 +116,10 @@ claudy pubkey
 ```
 
 Add it in GitLab as a **deploy key** for that one repository (*Settings → Repository → Deploy keys*), with *Grant write permissions* only if Claude should push. Do not add it to your user account: a user key would give the container access to every repository you can reach.
+
+On **GitHub** do the same under the repository's *Settings → Deploy keys* (tick *Allow write access* only if Claude should push). GitHub accepts a given deploy key on one repository only, and refuses a key that is already attached to a user account. Check it works with `ssh -T git@github.com` (it should greet the repository, e.g. `Hi owner/repo!`) and use an SSH remote (`git remote set-url origin git@github.com:owner/repo.git`) rather than `https://`.
+
+Deploy keys only give git access. They cannot open merge/pull requests or issues through an API.
 
 Notes:
 
