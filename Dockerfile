@@ -6,6 +6,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       jq unzip zip patch less file nano build-essential \
  && rm -rf /var/lib/apt/lists/*
 
+# Optional nested containers (podman inside the sandbox). Off by default: it is only useful
+# together with `CLAUDE_BOX_NESTED=1`, which gives the container /dev/fuse (see README).
+#   podman build --build-arg WITH_PODMAN=1 -t claude-sandbox-nested .
+ARG WITH_PODMAN=0
+RUN if [ "$WITH_PODMAN" = 1 ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        podman fuse-overlayfs slirp4netns uidmap \
+      && rm -rf /var/lib/apt/lists/* \
+      && mkdir -p /etc/containers/registries.conf.d \
+      && printf 'unqualified-search-registries = ["docker.io"]\n' > /etc/containers/registries.conf.d/10-docker.conf \
+      && printf '[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' > /etc/containers/containers.conf \
+      && printf '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\nignore_chown_errors = "true"\n' > /etc/containers/storage.conf ; \
+    fi
+
 # Miniforge: conda-forge only, no Anaconda "defaults" channel (ToS prompt / licensing)
 ENV CONDA_DIR=/opt/conda
 RUN curl -fsSL -o /tmp/miniforge.sh \

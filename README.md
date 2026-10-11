@@ -124,6 +124,79 @@ Notes:
   `CLAUDE_BOX_GIT_NAME="Your Name" CLAUDE_BOX_GIT_EMAIL=you@biofair.uk claude-box`.
   To change the default, edit the `GIT_*` variables in the `Dockerfile` and rebuild.
 
+## Dedicated WSL distro for nested containers (Windows only)
+
+Normal use needs none of this. It only applies if you want Claude to run containers itself (`CLAUDE_BOX_NESTED=1`), which passes `/dev/fuse` into the container and enlarges the kernel attack surface. On WSL2 an escape would land in a distro that can read your Windows drives and start Windows programs as you, so for nested mode use a **separate WSL distro that has neither**.
+
+On a plain Linux host there is no Windows side to protect: skip this section. Nested mode is still opt-in and off by default, and `claude-box` only checks the WSL conditions when it detects WSL.
+
+### 1. Create the distro (from PowerShell)
+
+```powershell
+wsl --update
+wsl --install -d Ubuntu-26.04 --name claude-sandbox
+```
+
+`--name` needs a recent WSL (2.4.4 or newer, see `wsl --version`). Without it, export and re-import an existing Ubuntu: `wsl --export Ubuntu ubuntu.tar` then `wsl --import claude-sandbox C:\wsl\claude-sandbox ubuntu.tar`; an imported distro starts as root, so create the user as described under *If you are root* below.
+
+When the installation finishes, Ubuntu asks you to create a Linux username and password, then opens a shell as that user:
+
+* The username can be anything (it doesn't have to match your Windows name). It becomes the default user of this distro.
+* Set a password: it is local to this distro, unrelated to your Windows login, and `sudo` needs it.
+
+*If you are root* (imported distro, or you started it with `wsl -d claude-sandbox -u root`): create the account yourself with `adduser <name>` followed by `usermod -aG sudo <name>`, and add `[user]` with `default = <name>` to `wsl.conf` below.
+
+### 2. Configure it
+
+Inside the distro, as your new user, open the file with `sudo nano /etc/wsl.conf` and put this in it:
+
+```ini
+[boot]
+systemd = true
+
+# No /mnt/c, /mnt/d ...
+[automount]
+enabled = false
+mountFsTab = false
+
+# Cannot start Windows programs (cmd.exe, powershell.exe)
+[interop]
+enabled = false
+appendWindowsPath = false
+```
+
+Save (Ctrl+O, Enter, Ctrl+X), then restart the distro from PowerShell so the settings take effect:
+
+```powershell
+wsl --terminate claude-sandbox
+wsl -d claude-sandbox
+```
+
+Check that the isolation works inside the distro:
+
+```bash
+ls /mnt/c                   # empty or missing
+cmd.exe                     # command not found
+```
+
+### 3. Install and use
+
+Inside the distro, follow *First-time setup* above (install Podman, clone this repository, build). For nested mode build the second image and start with the flag:
+
+```bash
+podman build --build-arg WITH_PODMAN=1 -t claude-sandbox-nested .
+cd ~/projects/my-analysis
+CLAUDE_BOX_NESTED=1 claude-box
+```
+
+Notes:
+
+* Keep projects on the distro's own filesystem (`~/projects`). Copy files in and out through `\\wsl.localhost\claude-sandbox\home\youruser` in Windows Explorer.
+* Without interop the login URL cannot open a browser: copy it from the terminal into your Windows browser by hand (the README's login steps already do this).
+* `localhost:8888` for Jupyter is still forwarded to Windows.
+* All WSL2 distros share one Linux kernel and VM. A separate distro keeps your Windows files out of reach, but it is not a separate virtual machine. The container can also still reach the network.
+* `claude-box` refuses nested mode on WSL while `/mnt/<drive>` or interop is active. `CLAUDE_BOX_ALLOW_UNSAFE_NESTED=1` overrides this; don't.
+
 ## Updating Claude Code
 
 Claude Code is installed when the image is built. Updates made at runtime are lost with `--rm`, so rebuild periodically:
@@ -141,6 +214,7 @@ What the container can see:
 
 * `/workspace`: the folder you started it from, read-write.
 * `/root/.ssh`: this project's own SSH key volume (see above).
+* With `CLAUDE_BOX_NESTED=1` only: `/dev/fuse` and `/var/lib/containers` (inner image storage, per project).
 * `/claude-config`: Claude Code's credentials, settings and session history. This volume is shared across projects, so it also holds transcripts from other projects. For strict separation between projects, run `CLAUDE_BOX_CONFIG="claude-config-$(basename "$PWD")" claude-box`, at the cost of logging in once per project.
 
 What it cannot see: the rest of the WSL filesystem, the Windows drives, your personal SSH keys and your git credentials, and other projects' SSH keys.

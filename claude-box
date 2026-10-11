@@ -4,9 +4,19 @@
 #   claude-box <cmd> [args]  any command, e.g. bash, snakemake --cores 4
 #   claude-box jupyter       Jupyter Notebook on http://localhost:8888
 #   claude-box pubkey        print this project's SSH public key
+#
+# Nested containers (podman inside the sandbox) are opt-in and need the nested image:
+#   CLAUDE_BOX_NESTED=1 claude-box
+# This passes /dev/fuse into the container. On WSL2 it refuses to run unless the
+# distro has Windows drives and interop disabled (see README, "Dedicated WSL distro").
 set -euo pipefail
 
-IMAGE=${CLAUDE_BOX_IMAGE:-claude-sandbox}
+NESTED=${CLAUDE_BOX_NESTED:-0}
+if [ "$NESTED" = 1 ]; then
+  IMAGE=${CLAUDE_BOX_IMAGE:-claude-sandbox-nested}
+else
+  IMAGE=${CLAUDE_BOX_IMAGE:-claude-sandbox}
+fi
 CONFIG_VOLUME=${CLAUDE_BOX_CONFIG:-claude-config}
 
 case "$PWD" in
@@ -33,6 +43,23 @@ if [ -n "${CLAUDE_BOX_GIT_NAME:-}" ]; then
 fi
 if [ -n "${CLAUDE_BOX_GIT_EMAIL:-}" ]; then
   opts+=(-e GIT_AUTHOR_EMAIL="$CLAUDE_BOX_GIT_EMAIL" -e GIT_COMMITTER_EMAIL="$CLAUDE_BOX_GIT_EMAIL")
+fi
+
+if [ "$NESTED" = 1 ]; then
+  [ -e /dev/fuse ] || { echo "claude-box: /dev/fuse not found on this host; cannot run nested." >&2; exit 1; }
+  # On WSL2, an escape from a container with /dev/fuse would reach the Windows drives
+  # (and Windows programs via interop) as your Windows user. Require a distro without them.
+  if grep -qi microsoft /proc/version 2>/dev/null && [ "${CLAUDE_BOX_ALLOW_UNSAFE_NESTED:-0}" != 1 ]; then
+    if grep -qE ' /mnt/[a-z] (9p|drvfs) ' /proc/mounts \
+       || [ -e /proc/sys/fs/binfmt_misc/WSLInterop ] || [ -e /proc/sys/fs/binfmt_misc/WSLInterop-late ]; then
+      echo "claude-box: nested mode refused: this WSL distro still has Windows drives mounted or interop enabled." >&2
+      echo "            Use a dedicated distro configured as in the README, or set CLAUDE_BOX_ALLOW_UNSAFE_NESTED=1." >&2
+      exit 1
+    fi
+  fi
+  # Inner image storage persists per project, in its own volume
+  opts+=(--device /dev/fuse --security-opt label=disable
+         -v "claude-containers-${project//[^A-Za-z0-9_.-]/_}-$hash":/var/lib/containers)
 fi
 
 if [ "${1:-}" = pubkey ]; then
