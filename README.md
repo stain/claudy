@@ -65,8 +65,8 @@ If the project contains `environment.yml`, the conda environment is created firs
 Claude Code then asks for a login method:
 
 1. Choose the **Claude subscription** login (not Claude Console / API).
-2. Open the printed URL in your Windows browser, signed in with the account that is a member of BioFAIR.
-3. Select the **BioFAIR** Team organisation and click **Authorize**.
+2. Open the printed URL in your Windows browser, signed in with the account that belongs to your Claude Team organisation.
+3. Select your Claude Team organisation and click **Authorize**.
 4. The browser cannot redirect back into the container, so it shows a code. Paste it at the `Paste code here if prompted` prompt.
 
 Run `/status` in Claude to confirm the account and organisation. If it picked the wrong organisation, run `/login` and choose again.
@@ -145,7 +145,7 @@ Notes:
 * Host keys are recorded on first contact (`StrictHostKeyChecking accept-new`) and kept in the same volume. For a self-hosted GitLab this works the same way.
 * To revoke: delete the deploy key in GitLab, and `podman volume rm` the volume (`podman volume ls` lists them). Removing it makes the next start generate a new key.
 * Commits are authored as `Claude Sandbox <claude-sandbox@localhost>` by default. Override per run:
-  `CLAUDY_GIT_NAME="Your Name" CLAUDY_GIT_EMAIL=you@biofair.uk claudy`.
+  `CLAUDY_GIT_NAME="Your Name" CLAUDY_GIT_EMAIL=you@example.org claudy`.
   To change the default, edit the `GIT_*` variables in the `Dockerfile` and rebuild.
 
 ## Dedicated WSL distro for nested containers (Windows only)
@@ -268,5 +268,5 @@ Limits of this isolation:
 ## Troubleshooting
 
 * **`claude: command not found` / conda errors on start**: check the entrypoint output; a failed `conda env create` stops the container. Delete `.conda_env/` to start from scratch.
-* **The organisation is not offered at login**: check on claude.ai that the browser is signed in with the email the BioFAIR admin invited, and that the invitation has been accepted.
+* **The organisation is not offered at login**: check on claude.ai that the browser is signed in with the email your organisation's admin invited, and that the invitation has been accepted.
 * **Port 8888 already in use**: another `claudy jupyter` is running; stop it or change the host port in the `claudy` script.

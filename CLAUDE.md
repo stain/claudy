@@ -20,7 +20,7 @@ The full threat model and known limitations are in `SECURITY.md`; keep it in syn
 - Docs and scripts in this repo are public. Never add secrets, hostnames, usernames, project/dataset names or key material to any file here. Changes to `SECURITY.md`, `README.md` and `CLAUDE.md` weakening a stated protection need explicit user review, like code changes.
 - Ports bind to `127.0.0.1` only.
 - Conda channels: `conda-forge` and `bioconda` only. Never add Anaconda `defaults` (ToS/licensing).
-- Never set or rely on `ANTHROPIC_API_KEY`; auth is the Claude Team (BioFAIR) subscription login stored in the volume.
+- Never set or rely on `ANTHROPIC_API_KEY`; auth is the Claude Team subscription login stored in the volume.
 - Network is unrestricted. That's a documented limitation, not something to "fix" silently.
 - **Trust boundary:** when this repo itself is the mounted `/workspace`, Claude can edit `claudy`, which the user runs on the host (it's symlinked into `~/bin`). Treat changes to `claudy` and `Dockerfile` as needing explicit user review. The README's intended layout keeps this repo outside any project folder.
 
