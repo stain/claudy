@@ -1,0 +1,24 @@
+#!/bin/bash
+# Run the claude-sandbox container with only the current directory mounted.
+#   claude-box               Claude Code
+#   claude-box <cmd> [args]  any command, e.g. bash, snakemake --cores 4
+#   claude-box jupyter       Jupyter Notebook on http://localhost:8888
+set -euo pipefail
+
+IMAGE=${CLAUDE_BOX_IMAGE:-claude-sandbox}
+CONFIG_VOLUME=${CLAUDE_BOX_CONFIG:-claude-config}
+
+case "$PWD" in
+  / | "$HOME" | /mnt/c | /mnt/c/Users/*)
+    echo "claude-box: refusing to mount $PWD; cd into a project folder first." >&2
+    exit 1 ;;
+esac
+
+opts=(-it --rm -v "$PWD":/workspace -v "$CONFIG_VOLUME":/claude-config)
+
+if [ "${1:-}" = jupyter ]; then
+  opts+=(-p 127.0.0.1:8888:8888)
+  set -- jupyter notebook --ip=0.0.0.0 --no-browser --allow-root
+fi
+
+exec podman run "${opts[@]}" "$IMAGE" "$@"

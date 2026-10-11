@@ -1,0 +1,13 @@
+name: claude_sandbox
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - pandas
+  - numpy
+  - scipy
+  - snakemake
+  - pip
+  - openpyxl
+  - notebook

@@ -1,0 +1,5 @@
+# Per-project conda environment created by entrypoint.sh
+.conda_env/
+
+# Windows "downloaded from internet" metadata streams copied into WSL
+*:Zone.Identifier
