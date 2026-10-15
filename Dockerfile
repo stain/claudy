@@ -38,7 +38,11 @@ RUN printf '%s\n' \
       '. /opt/conda/etc/profile.d/conda.sh' \
       'if [ -d /workspace/.conda_env/conda-meta ] && [ "${CONDA_PREFIX:-}" != /workspace/.conda_env ]; then' \
       '    conda activate /workspace/.conda_env' \
-      'fi' >> /etc/bash.bashrc
+      'fi' >> /etc/bash.bashrc \
+ # The entrypoint's activation already set CONDA_PROMPT_MODIFIER, but root's own
+ # .bashrc resets PS1 afterwards, so re-add the "(env)" prefix there.
+ && printf '%s\n' \
+      'case "${CONDA_PROMPT_MODIFIER:-}" in "") ;; *) case "$PS1" in *"$CONDA_PROMPT_MODIFIER"*) ;; *) PS1="${CONDA_PROMPT_MODIFIER}${PS1}" ;; esac ;; esac' >> /root/.bashrc
 
 RUN npm install -g @anthropic-ai/claude-code
 
