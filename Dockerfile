@@ -31,6 +31,15 @@ RUN curl -fsSL -o /tmp/miniforge.sh \
 # A non-existent PATH entry is harmless until the env has been created.
 ENV PATH=/workspace/.conda_env/bin:$CONDA_DIR/bin:$PATH
 
+# Interactive shells (claudy bash, podman exec -it): define the `conda` function and
+# activate the project env if it exists. Not `conda init`, which would activate base.
+# The entrypoint does the same for the started command.
+RUN printf '%s\n' \
+      '. /opt/conda/etc/profile.d/conda.sh' \
+      'if [ -d /workspace/.conda_env/conda-meta ] && [ "${CONDA_PREFIX:-}" != /workspace/.conda_env ]; then' \
+      '    conda activate /workspace/.conda_env' \
+      'fi' >> /etc/bash.bashrc
+
 RUN npm install -g @anthropic-ai/claude-code
 
 # Commit identity. Override per run with CLAUDY_GIT_NAME / CLAUDY_GIT_EMAIL (see claudy)

@@ -85,7 +85,7 @@ claudy pubkey                # this project's SSH public key
 claudy jupyter               # Jupyter on http://localhost:8888 (use the token URL it prints)
 ```
 
-The project's conda environment (`/workspace/.conda_env/bin`) is on `PATH` for every command, so there is no need for `conda activate`.
+The project's conda environment (`/workspace/.conda_env/bin`) is on `PATH` for every command, so there is no need for `conda activate`. The entrypoint and interactive shells (via `/etc/bash.bashrc`) also activate it when it exists, and `conda activate` works in those shells.
 
 ## Conda environment
 
