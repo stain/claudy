@@ -106,6 +106,29 @@ Nested mode adds `/dev/fuse` (the entrypoint then switches Podman to `overlay` o
 ### Image and supply chain
 The image is built from a floating `node:22-slim` tag, the latest Miniforge installer (downloaded and run without checksum verification), and unpinned `npm install -g @anthropic-ai/claude-code`. Conda packages come from `conda-forge` and `bioconda` without hash pinning (the channel allowlist does not cover `environment.yml` or `pip:`, see *The project conda env* above), and nested containers pull images from Docker Hub without verification. Packages Claude installs at runtime (`apt`, `pip`, `npm`) are further unpinned inputs. A compromise of any of these ends up inside the container, and inside your project through code that environment runs. Pin versions and checksums for stricter use (see *Future work* in `CLAUDE.md`).
 
+### The image can be replaced without notice
+`claudy` starts whatever image is stored under its name in your user's own Podman storage. That storage belongs to your user, so anything running as your user on the host (a process after a container escape, a tool or script you ran on the distro, a tampered shell startup file) can put a different image under that name, or point `claudy` at another image. Nothing visible changes. The next start then runs that image with your project folder, the Claude login and the project's deploy key mounted, and with whatever instructions, entrypoint and Claude Code version it contains. A session inside the container cannot do this on its own: nested Podman keeps its images in separate storage, so replacing the host's image needs an escape or something running outside the container first.
+
+What `claudy` already does: it refers to the image by a fully qualified local name and never pulls, so a missing or misspelt image fails instead of being fetched from a public registry. It warns when the image is older than the repository's build files, but that is a reminder to rebuild, not a tamper check.
+
+How to protect against replacement, from simplest to strongest:
+
+* Rebuild after reviewing `git diff`, rather than trusting an image whose origin you don't remember, and rebuild if `claudy` behaves unexpectedly. Don't keep images from other sources under the same name.
+* Have `claudy` compare the image's ID with one recorded when you built it. If your user can write that record, this only catches mistakes: whatever can replace the image can update the record too.
+* Make the record, the launcher and the build belong to a different user than the one that runs `claudy`, so an escaped or compromised `claudy` user cannot change them (the two-user layout under *Future work* in `CLAUDE.md`).
+
+Keep this in proportion: something that already runs as your user on the host can also change the launcher, your shell or your other files. Replacing the image is one of the ways it could stay hidden and reach later sessions, which is why the main defence is keeping that user uncompromised (*Self-modification of the sandbox*, *Human factors*).
+
+### Building locally or pulling from a registry
+The image is built locally from this repository. That keeps the trust chain short: you read the `Dockerfile` change, you build, and the image never comes from someone else's account or build server. Its weaknesses are that the build itself fetches unpinned inputs (see *Image and supply chain*), so two builds of the same commit can differ and nothing records what an image contains, and that the result sits in storage your user can change.
+
+A prebuilt image from a registry, built by the repository's CI, would turn that around:
+
+* **Gains:** one build for everyone, the option to sign it and publish provenance, and, when pulled by digest rather than by tag, a content identifier that a local copy can be checked against later. Setup is quicker and needs no build tools.
+* **Costs:** you then also trust the CI system, the registry and the maintainers' accounts, and a compromised publish reaches every user at their next update. Tags can be moved, so only a digest pins an image. Reviewing the `Dockerfile` diff no longer tells you what the image contains. A launcher that pulls also reaches the network at start.
+
+If a registry image is offered, it should be optional and pinned: the expected digest kept in this repository, so it changes only through a commit you review; its signature checked before use; and pulling done as an explicit update step, never implicitly at start. Pinning the build inputs (*Future work* in `CLAUDE.md`) is a prerequisite for either way: it makes local builds repeatable and lets a published image be checked against a local rebuild. Until then, local builds remain the default.
+
 ### Weaker defaults
 The container uses Podman's default capability set and its default seccomp profile, with vsock blocked (see above); there is no `--cap-drop=ALL`, `no-new-privileges`, read-only root filesystem or resource limits (CPU, memory, processes). A runaway process, or a nested build on `vfs` storage, can exhaust the host's CPU, memory or disk. The container runs as in-container root, which rootless Podman maps to your user. A non-root user inside would add little on its own: it would map to the same host user, and any process can still create a user namespace with full capabilities inside it (nested Podman relies on that). Possible next steps are `no-new-privileges`, dropping unused capabilities and a separate host subuid range per project (*Future work* in `CLAUDE.md`).
 
@@ -145,6 +168,7 @@ The dedicated distro is only a launcher; running project code there (tests, dev 
 | Lasting changes to the image from inside the container | Cross-project influence through the shared `claude-config` volume (hooks, memory) |
 | Unintended access to the Windows drives (with the dedicated distro) | Kernel or runtime escapes, a shared WSL2 kernel; root in the distro can mount the Windows drives |
 | | Supply-chain compromise of the image or conda packages |
+| | Replacement of the local `claudy` image by something running as your user on the host |
 | | Isolation between Claude sessions or code bases that must not see each other (shared config volume, same user and kernel) |
 | | Tampering in `.conda_env`, which persists between sessions and is not in `git diff` |
 | | Pages from the container opened in your browser (they run outside the sandbox, with your browser's logins and `localhost` access) |

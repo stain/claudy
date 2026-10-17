@@ -613,6 +613,7 @@ Risks to be aware of (each explained in `SECURITY.md`):
 * **It limits mistakes, it doesn't isolate projects from each other** (*Goal and threat model*). Sessions share the Claude config volume by default, and an escape from any container lands as your user.
 * **On WSL2 the dedicated distro is not a virtual machine**: root in the distro can reach your Windows files, so nothing from a container may get there, and never type the `sudo` password where Claude or code it ran could see it (*WSL2 is not a virtual machine boundary to Windows*).
 * **What you run or open outside the container is outside the sandbox**: scripts, hooks and notebooks from the project, its `.conda_env`, and pages from `--ports` or Jupyter in your browser (*The project folder is writable*, *The project conda env*, *Published ports*).
+* **The image could be swapped under you**: anything running as your user on the host can replace the `claudy` image, and the next start runs it with your project and login. Rebuild from a reviewed checkout (*The image can be replaced without notice*).
 * **Deploy keys reach beyond the container**: a write key can push to any branch and start CI (*SSH deploy keys reach beyond the container*).
 * **Network access is unrestricted.** Claude, or code it runs, can send anything in `/workspace` to the internet. Do not use this sandbox for data that must not leave the machine, such as Trusted Research Environment data.
 * No ports are published by default. `claudy jupyter` (8888) and `--ports` bind to `127.0.0.1` only.
