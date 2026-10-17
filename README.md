@@ -82,7 +82,8 @@ claudy                       # Claude Code
 claudy bash                  # a shell in the same environment
 claudy snakemake --cores 4   # any command
 claudy pubkey                # this project's SSH public key
-claudy jupyter               # Jupyter on http://localhost:8888 (use the token URL it prints)
+claudy jupyter               # Jupyter Notebook on http://localhost:8888 (needs notebook in environment.yml, see below)
+claudy --ports 8080,5173     # Claude Code, with these ports reachable on http://localhost:<port> (see below)
 ```
 
 The project's conda environment (`/workspace/.conda_env/bin`) is on `PATH` for every command, so there is no need for `conda activate`. The entrypoint and interactive shells (via `/etc/bash.bashrc`) also activate it when it exists, and `conda activate` works in those shells.
@@ -105,6 +106,51 @@ channels:
 ```
 
 The environment is ignored by git automatically; no entry in the project's `.gitignore` is needed.
+
+## Opening ports (`--ports`)
+
+By default no container port is reachable from your machine, so a web app or dev server that Claude starts inside the container can't be opened in your browser. `--ports` publishes the listed ports under the same number on your host's `127.0.0.1`:
+
+```bash
+claudy --ports 8080                  # Claude Code, port 8080 reachable as http://localhost:8080
+claudy --ports 8080,5173 bash        # a shell, two ports
+claudy --ports=3000 --ports 8080     # the option can be repeated
+```
+
+* Put `--ports` before the command; it combines with any command, including `jupyter`.
+* The server must listen on `0.0.0.0` inside the container, not `127.0.0.1`/`localhost` (most dev servers default to localhost), e.g. `python -m http.server 8080 --bind 0.0.0.0`.
+* Use ports 1024 or higher: rootless Podman can't publish lower ones by default, and nested containers can't listen on them.
+* Ports are fixed when the container starts. To add one, exit and restart with it; `claudy --ports 8080 claude --continue` resumes the last conversation. Claude knows this and asks you to restart when it needs a port, explaining why. Anything not saved in the project (temporary installs, background processes) is lost on restart.
+* Inside the container, `CLAUDY_PORTS` lists the published ports.
+* While published, the port is reachable by any program on your machine, including web pages in your browser and, on WSL2, the Windows side. Dev servers rarely have authentication, so publish ports only for the session that needs them. See `SECURITY.md`.
+
+## Jupyter Notebook
+
+The image does not include Jupyter. `claudy jupyter` runs `jupyter notebook` from the project's conda environment, so add `notebook` to the project's `environment.yml`, for example:
+
+```yaml
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - notebook
+  # your analysis packages, e.g.
+  - pandas
+  - matplotlib
+```
+
+Then, from the project folder:
+
+```bash
+claudy jupyter                       # http://localhost:8888 (published automatically), open the token URL it prints
+claudy --ports 8050 jupyter          # also publish 8050, e.g. for a Dash app started from a notebook
+claudy --ports 8888                  # Claude Code with 8888 published, so Jupyter can run alongside Claude
+```
+
+With the last form, start Jupyter inside the session (ask Claude, or run it in a `!` shell command) so that it listens on all interfaces: `jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root`. Ask Claude for the token URL, or run `jupyter server list`; it shows the container's hostname, so open it as `http://localhost:8888/?token=...`. Claude can then work on the same notebooks while you have them open. The server stops when you exit Claude.
+
+Notebooks are saved in the project folder. The Jupyter server runs with the same isolation as Claude (only the project folder, its own SSH key), and anyone with the token URL can run code in the container. Without `notebook` in the environment, `claudy jupyter` fails with `jupyter: not found`.
 
 ## Git, GitLab and GitHub (SSH)
 
@@ -151,9 +197,23 @@ Notes:
 
 ## Dedicated WSL distro for nested containers (Windows only)
 
-Normal use needs none of this. It only applies if you want Claude to run containers itself (`CLAUDY_NESTED=1`), which passes `/dev/fuse` into the container and enlarges the kernel attack surface. On WSL2 an escape would land in a distro that can read your Windows drives and start Windows programs as you, so for nested mode use a **separate WSL distro that has neither**.
+Normal use doesn't strictly need this. Podman inside the container works without it, but uses user namespaces heavily (see `SECURITY.md`, *Nested containers*), so a dedicated distro is recommended if Claude will run containers, and required for `CLAUDY_NESTED=1`, which also passes `/dev/fuse` into the container and enlarges the kernel attack surface further. On WSL2 an escape would land in a distro that can read your Windows drives and start Windows programs as you, so for nested mode use a **separate WSL distro that has neither**.
 
 On a plain Linux host there is no Windows side to protect: skip this section. Nested mode is still opt-in and off by default, and `claudy` only checks the WSL conditions when it detects WSL.
+
+### Automated: `new-claudy-distro.ps1`
+
+`new-claudy-distro.ps1` does steps 1 to 4 below, plus the first-time setup, in one go from Windows. It installs the distro, creates your user (asking for its password), writes `/etc/wsl.conf`, installs Podman, git and vim, removes the packages listed in step 4, restarts the distro, checks that the Windows drives and interop are gone, then clones this repository over HTTPS, builds the image and links `~/bin/claudy`. The Linux part is plain bash embedded in the script and piped into `wsl.exe`; read it before running.
+
+Download it from GitHub (it is a single file), read it, then run it from PowerShell:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/stain/claudy/main/new-claudy-distro.ps1 -OutFile new-claudy-distro.ps1
+notepad new-claudy-distro.ps1
+powershell -ExecutionPolicy Bypass -File .\new-claudy-distro.ps1 -User yourname
+```
+
+Options: `-Name` (default `claude-sandbox`), `-Distro` (default `Ubuntu-26.04`), `-Location` (folder for the virtual disk), `-SkipTrim`, `-SkipBuild`. It refuses to touch an existing distro of the same name. Afterwards, back up the result (`wsl --export claude-sandbox claude-sandbox.tar`) and continue with *Keep Claude away from the distro itself* below. The manual steps follow.
 
 ### 1. Create the distro (from PowerShell)
 
@@ -206,10 +266,9 @@ cmd.exe                     # command not found
 
 ### 3. Install and use
 
-Inside the distro, install the prerequisites (`sudo apt update && sudo apt install -y podman`), then follow *First-time setup* above: it clones this repository from GitHub over HTTPS, builds the image and links `claudy`. That is the only thing the isolated distro fetches from outside, so it needs no keys. For nested mode build the second image and start with the flag:
+Inside the distro, install the prerequisites (`sudo apt update && sudo apt install -y podman`), then follow *First-time setup* above: it clones this repository from GitHub over HTTPS, builds the image and links `claudy`. That is the only thing the isolated distro fetches from outside, so it needs no keys. The image includes Podman by default (build arg `WITH_PODMAN=1`, `0` leaves it out), preconfigured for nested use (subuid/subgid range, host network). Podman works without `/dev/fuse` using the `vfs` storage driver; the entrypoint switches to `overlay` on `fuse-overlayfs` when `/dev/fuse` is present, i.e. with `CLAUDY_NESTED=1`. Nested mode uses the same image; start it with the flag:
 
 ```bash
-podman build --build-arg WITH_PODMAN=1 -t claudy-nested .
 cd ~/projects/my-analysis
 CLAUDY_NESTED=1 claudy
 ```
@@ -223,15 +282,90 @@ Notes:
 * `claudy` and the `Dockerfile` run with your user's rights on the host, so `git pull` only from a source you trust, and read `git diff` of those two files after pulling.
 * `claudy` refuses nested mode on WSL while `/mnt/<drive>` or interop is active. `CLAUDY_ALLOW_UNSAFE_NESTED=1` overrides this; don't.
 
-### 4. Keep Claude away from the distro itself
+### 4. Trim the distro
 
-Claude should be able to build and run containers for development work, but never to change its own sandbox. This holds only if you keep the roles apart:
+The sandbox distro only has to start `claudy`: it needs the base system, systemd, `apt` with security updates, `sudo`, Podman and its helpers, `git` to update this repository, and an editor. Compilers, Node.js, Java, TeX and GUI apps belong in the container image or a project's environment, not here. Every extra package is more code running as your user next to the sandbox (setuid binaries, services, update and telemetry agents, and `wsl-pro-service`, which talks to the Windows side), so remove what you don't need. A desktop-style Ubuntu WSL install can easily carry over a thousand packages; after trimming, a few hundred remain.
+
+The list below matches a typical Ubuntu 26.04 WSL install with developer tools added; adjust it to what `apt-mark showmanual` shows on yours.
+
+1. **Back up first**, from PowerShell, so you can restore if something breaks:
+
+   ```powershell
+   wsl --export claude-sandbox C:\wsl\claude-sandbox-before-trim.tar
+   ```
+
+2. **Look at what is there** (inside the distro):
+
+   ```bash
+   apt-mark showmanual                         # packages installed on purpose
+   dpkg-query -W -f='${Installed-Size}\t${Package}\n' | sort -n | tail -30   # largest
+   snap list                                   # snaps, if snapd is installed
+   systemctl list-unit-files --state=enabled   # services started at boot
+   ```
+
+3. **Protect what must stay** by marking it as manually installed, so that removing a metapackage (`ubuntu-minimal`, `ubuntu-wsl`) can't take it along:
+
+   ```bash
+   sudo apt-mark manual apt sudo sudo-rs systemd systemd-sysv systemd-resolved init \
+     dbus dbus-user-session libpam-systemd wsl-setup ca-certificates locales tzdata \
+     unattended-upgrades less vim vim-tiny nano git iproute2 procps nftables \
+     podman uidmap passt slirp4netns fuse-overlayfs crun conmon netavark aardvark-dns catatonit
+   ```
+
+4. **Remove the rest.** Simulate first (`-s`) and read the `Remv` lines: none of the packages from step 3 may appear. Leave out anything from this list you still want (e.g. `tmux`).
+
+   ```bash
+   remove=(
+     # GUI and desktop tools (no use without interop/WSLg in this distro)
+     code alacritty x11-utils x11-xserver-utils xauth dbus-x11 ibus-gtk3 xdg-utils
+     xdg-user-dirs mupdf-tools libnotify-bin
+     # documents
+     pandoc texlive-base texlive-binaries texlive-fonts-recommended texlive-latex-base
+     texlive-latex-extra texlive-latex-recommended texlive-luatex texlive-pictures
+     texlive-plain-generic lmodern tipa dvisvgm
+     # toolchains: these belong in the container
+     build-essential gcc g++ make dpkg-dev nodejs npm eslint webpack terser gyp
+     handlebars wabt ruby rake default-jre default-jre-headless openjdk-25-jre
+     openjdk-25-jre-headless tcl tk buildah criu
+     # remote management, telemetry, cloud and Windows integration agents
+     snapd landscape-client landscape-common ubuntu-pro-client ubuntu-pro-client-l10n
+     wsl-pro-service ubuntu-insights cloud-init cloud-init-base cloud-guest-utils
+     apport apport-core-dump-handler apport-symptoms python3-apport packagekit
+     software-properties-common update-manager-core ubuntu-release-upgrader-core
+     update-motd motd-news-config show-motd command-not-found pastebinit
+     # interactive extras and services the sandbox host doesn't need
+     byobu screen tmux htop run-one chrony rsyslog openssh-client rsync lsof lshw ethtool
+   )
+   sudo apt purge --autoremove -s "${remove[@]}" | grep -E '^(Remv|Purg) ' | less
+   sudo apt purge --autoremove "${remove[@]}"
+   sudo apt purge '~c'                         # leftover config of removed packages
+   ```
+
+   `openssh-client` is not needed because the distro clones this repository over HTTPS. Without `ubuntu-release-upgrader-core` there is no `do-release-upgrade`: for a new Ubuntu release, create a fresh distro instead (clone, build, link). Keep `unattended-upgrades`, which installs security updates.
+
+5. **Repeat** `apt-mark showmanual` and remove anything else you don't recognise as needed (`sudo apt purge --autoremove <pkg>`, simulate with `-s` first). Check `systemctl list-unit-files --state=enabled` and `systemctl --failed` again.
+
+6. **Check that everything still works**, after restarting the distro from PowerShell (`wsl --terminate claude-sandbox`, then `wsl -d claude-sandbox`):
+
+   ```bash
+   sudo -v                                     # sudo still works
+   ls /mnt/c; cmd.exe                          # still isolated (missing / not found)
+   git -C ~/claudy pull                        # HTTPS to GitHub works
+   podman info --format '{{.Host.Security.Rootless}}'                    # true
+   cd ~/projects/my-analysis && claudy bash -c 'podman run --rm docker.io/library/hello-world'
+   ```
+
+   If something is broken and you can't fix it, restore the backup from PowerShell: `wsl --unregister claude-sandbox`, then `wsl --import claude-sandbox C:\wsl\claude-sandbox C:\wsl\claude-sandbox-before-trim.tar`. An imported distro starts as root unless `wsl.conf` has `[user]` `default = <name>` (see *If you are root* above).
+
+### 5. Keep Claude away from the distro itself
+
+Claude may change the *running* container for its work (install a tool, edit `/etc`), but those changes vanish when it exits, and it can't change the image, `claudy` or anything on the host. Anything a project needs permanently, Claude sets up and documents in that project, the way the project already does it (`environment.yml`, `pyproject.toml`, a `Dockerfile`, the README), so it shows up in `git diff` for you to review. This holds only if you keep the roles apart:
 
 * **Claude runs only in the container.** Start it with `claudy`, never by running `claude` directly in the distro's shell. A Claude running in the distro shell would act as your Linux user, with your `sudo` rights and access to `~/claudy`.
 * **Never give Claude the `sudo` password.** Don't type it into a Claude prompt or into any command Claude is running, and don't answer a `sudo` password prompt that appears in a session where Claude is working. The distro's `sudo` is for you, in a separate terminal, outside `claudy`.
 * **Don't enable passwordless sudo** (no `NOPASSWD` in `/etc/sudoers.d/`).
 * **Rebuilds and updates are done by you, outside the container.** If Claude needs another package, a changed `Dockerfile`, a new Miniforge or a rebuilt image, it should tell you what to change. You review the change, then run `git pull`, `podman build ...` or `sudo apt ...` in your own terminal and restart `claudy`. Claude shouldn't be asked to do this for you, and shouldn't be given a way to.
-* **Nested containers are Claude's workspace.** Inside the container it can pull images, build its own images and run containers for development work. That inner storage is the per-project `claude-containers-*` volume, separate from the outer image and from your host's Podman images, so it can't modify `claudy` or `claudy-nested`. Remove it with `podman volume rm` to start clean.
+* **Nested containers are Claude's workspace.** Inside the container it can pull images, build its own images and run containers for development work. That inner storage is the per-project `claude-containers-*` volume, separate from the outer image and from your host's Podman images, so it can't modify the `claudy` image. Remove it with `podman volume rm` to start clean.
 * **Keep `~/claudy` out of the mounted project folder** and never run `claudy` from inside it (or from its parent directory), because the project folder is writable by Claude, and `claudy`, `Dockerfile` and `entrypoint.sh` are executed with your rights.
 * **Don't put credentials for this distro into a project**: no `~/.ssh` keys, tokens or `.env` files holding secrets you wouldn't give to Claude.
 
@@ -262,7 +396,7 @@ What it cannot see: the rest of the WSL filesystem, the Windows drives, your per
 Limits of this isolation:
 
 * **Network access is unrestricted.** Claude, or code it runs, can send anything in `/workspace` to the internet. Do not use this sandbox for data that must not leave the machine, such as Trusted Research Environment data.
-* Port 8888 is bound to `127.0.0.1` only, and only by `claudy jupyter`.
+* No ports are published by default. `claudy jupyter` (8888) and `--ports` bind to `127.0.0.1` only.
 * Avoid VS Code Dev Containers for this setup: by default they forward your SSH agent and git credentials into the container.
 * To log out everywhere: `podman volume rm claude-config`.
 
@@ -270,4 +404,5 @@ Limits of this isolation:
 
 * **`claude: command not found` / conda errors on start**: check the entrypoint output; a failed `conda env create` stops the container. Delete `.conda_env/` to start from scratch.
 * **The organisation is not offered at login**: check on claude.ai that the browser is signed in with the email your organisation's admin invited, and that the invitation has been accepted.
-* **Port 8888 already in use**: another `claudy jupyter` is running; stop it or change the host port in the `claudy` script.
+* **`jupyter: not found`**: add `notebook` to the project's `environment.yml` (see *Jupyter Notebook*).
+* **Port already in use** (`address already in use` from podman): another `claudy jupyter` or `claudy --ports` session holds it; stop that one or pick another port.

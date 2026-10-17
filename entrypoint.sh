@@ -17,6 +17,17 @@ if [ -d "$SSH_DIR" ] && [ ! -f "$SSH_DIR/id_ed25519" ]; then
     cat "$SSH_DIR/id_ed25519.pub" >&2
 fi
 
+# Nested podman: vfs works everywhere; with /dev/fuse (CLAUDY_NESTED=1) use overlay on
+# fuse-overlayfs, which is faster and uses less disk. Rewritten on every start because
+# the container is recreated each time.
+if command -v podman >/dev/null 2>&1; then
+    if [ -c /dev/fuse ] && command -v fuse-overlayfs >/dev/null 2>&1; then
+        printf '[storage]\ndriver = "overlay"\nrunroot = "/run/containers/storage"\ngraphroot = "/var/lib/containers/storage"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\nignore_chown_errors = "true"\n' > /etc/containers/storage.conf
+    else
+        printf '[storage]\ndriver = "vfs"\nrunroot = "/run/containers/storage"\ngraphroot = "/var/lib/containers/storage"\n' > /etc/containers/storage.conf
+    fi
+fi
+
 if [ -f "$YML" ]; then
     if [ ! -d "$ENV_DIR" ]; then
         echo "Creating conda env in $ENV_DIR ..."
