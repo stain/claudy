@@ -9,9 +9,9 @@
 #   --ports 8080,8081    publish these container ports 1:1 on 127.0.0.1 of the host,
 #                        e.g. for a dev server (it must listen on 0.0.0.0 inside)
 #
-# Nested containers (podman inside the sandbox) are opt-in and need the nested image:
+# Podman works inside the sandbox without extra options (vfs storage). Nested mode is opt-in:
 #   CLAUDY_NESTED=1 claudy
-# This passes /dev/fuse into the container. On WSL2 it refuses to run unless the
+# This passes /dev/fuse (faster overlay storage) and keeps inner images in a per-project volume. On WSL2 it refuses to run unless the
 # distro has Windows drives and interop disabled (see README, "Dedicated WSL distro").
 set -euo pipefail
 
@@ -35,11 +35,7 @@ while [ $# -gt 0 ]; do
 done
 
 NESTED=${CLAUDY_NESTED:-0}
-if [ "$NESTED" = 1 ]; then
-  IMAGE=${CLAUDY_IMAGE:-claudy-nested}
-else
-  IMAGE=${CLAUDY_IMAGE:-claudy}
-fi
+IMAGE=${CLAUDY_IMAGE:-claudy}
 CONFIG_VOLUME=${CLAUDY_CONFIG:-claude-config}
 
 case "$PWD" in
