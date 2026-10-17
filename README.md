@@ -201,6 +201,20 @@ Normal use doesn't strictly need this. Podman inside the container works without
 
 On a plain Linux host there is no Windows side to protect: skip this section. Nested mode is still opt-in and off by default, and `claudy` only checks the WSL conditions when it detects WSL.
 
+### Automated: `new-claudy-distro.ps1`
+
+`new-claudy-distro.ps1` does steps 1 to 4 below, plus the first-time setup, in one go from Windows. It installs the distro, creates your user (asking for its password), writes `/etc/wsl.conf`, installs Podman, git and vim, removes the packages listed in step 4, restarts the distro, checks that the Windows drives and interop are gone, then clones this repository over HTTPS, builds the image and links `~/bin/claudy`. The Linux part is plain bash embedded in the script and piped into `wsl.exe`; read it before running.
+
+Download it from GitHub (it is a single file), read it, then run it from PowerShell:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/stain/claudy/main/new-claudy-distro.ps1 -OutFile new-claudy-distro.ps1
+notepad new-claudy-distro.ps1
+powershell -ExecutionPolicy Bypass -File .\new-claudy-distro.ps1 -User yourname
+```
+
+Options: `-Name` (default `claude-sandbox`), `-Distro` (default `Ubuntu-26.04`), `-Location` (folder for the virtual disk), `-SkipTrim`, `-SkipBuild`. It refuses to touch an existing distro of the same name. Afterwards, back up the result (`wsl --export claude-sandbox claude-sandbox.tar`) and continue with *Keep Claude away from the distro itself* below. The manual steps follow.
+
 ### 1. Create the distro (from PowerShell)
 
 ```powershell
@@ -268,7 +282,82 @@ Notes:
 * `claudy` and the `Dockerfile` run with your user's rights on the host, so `git pull` only from a source you trust, and read `git diff` of those two files after pulling.
 * `claudy` refuses nested mode on WSL while `/mnt/<drive>` or interop is active. `CLAUDY_ALLOW_UNSAFE_NESTED=1` overrides this; don't.
 
-### 4. Keep Claude away from the distro itself
+### 4. Trim the distro
+
+The sandbox distro only has to start `claudy`: it needs the base system, systemd, `apt` with security updates, `sudo`, Podman and its helpers, `git` to update this repository, and an editor. Compilers, Node.js, Java, TeX and GUI apps belong in the container image or a project's environment, not here. Every extra package is more code running as your user next to the sandbox (setuid binaries, services, update and telemetry agents, and `wsl-pro-service`, which talks to the Windows side), so remove what you don't need. A desktop-style Ubuntu WSL install can easily carry over a thousand packages; after trimming, a few hundred remain.
+
+The list below matches a typical Ubuntu 26.04 WSL install with developer tools added; adjust it to what `apt-mark showmanual` shows on yours.
+
+1. **Back up first**, from PowerShell, so you can restore if something breaks:
+
+   ```powershell
+   wsl --export claude-sandbox C:\wsl\claude-sandbox-before-trim.tar
+   ```
+
+2. **Look at what is there** (inside the distro):
+
+   ```bash
+   apt-mark showmanual                         # packages installed on purpose
+   dpkg-query -W -f='${Installed-Size}\t${Package}\n' | sort -n | tail -30   # largest
+   snap list                                   # snaps, if snapd is installed
+   systemctl list-unit-files --state=enabled   # services started at boot
+   ```
+
+3. **Protect what must stay** by marking it as manually installed, so that removing a metapackage (`ubuntu-minimal`, `ubuntu-wsl`) can't take it along:
+
+   ```bash
+   sudo apt-mark manual apt sudo sudo-rs systemd systemd-sysv systemd-resolved init \
+     dbus dbus-user-session libpam-systemd wsl-setup ca-certificates locales tzdata \
+     unattended-upgrades less vim vim-tiny nano git iproute2 procps nftables \
+     podman uidmap passt slirp4netns fuse-overlayfs crun conmon netavark aardvark-dns catatonit
+   ```
+
+4. **Remove the rest.** Simulate first (`-s`) and read the `Remv` lines: none of the packages from step 3 may appear. Leave out anything from this list you still want (e.g. `tmux`).
+
+   ```bash
+   remove=(
+     # GUI and desktop tools (no use without interop/WSLg in this distro)
+     code alacritty x11-utils x11-xserver-utils xauth dbus-x11 ibus-gtk3 xdg-utils
+     xdg-user-dirs mupdf-tools libnotify-bin
+     # documents
+     pandoc texlive-base texlive-binaries texlive-fonts-recommended texlive-latex-base
+     texlive-latex-extra texlive-latex-recommended texlive-luatex texlive-pictures
+     texlive-plain-generic lmodern tipa dvisvgm
+     # toolchains: these belong in the container
+     build-essential gcc g++ make dpkg-dev nodejs npm eslint webpack terser gyp
+     handlebars wabt ruby rake default-jre default-jre-headless openjdk-25-jre
+     openjdk-25-jre-headless tcl tk buildah criu
+     # remote management, telemetry, cloud and Windows integration agents
+     snapd landscape-client landscape-common ubuntu-pro-client ubuntu-pro-client-l10n
+     wsl-pro-service ubuntu-insights cloud-init cloud-init-base cloud-guest-utils
+     apport apport-core-dump-handler apport-symptoms python3-apport packagekit
+     software-properties-common update-manager-core ubuntu-release-upgrader-core
+     update-motd motd-news-config show-motd command-not-found pastebinit
+     # interactive extras and services the sandbox host doesn't need
+     byobu screen tmux htop run-one chrony rsyslog openssh-client rsync lsof lshw ethtool
+   )
+   sudo apt purge --autoremove -s "${remove[@]}" | grep '^Remv' | less
+   sudo apt purge --autoremove "${remove[@]}"
+   sudo apt purge '~c'                         # leftover config of removed packages
+   ```
+
+   `openssh-client` is not needed because the distro clones this repository over HTTPS. Without `ubuntu-release-upgrader-core` there is no `do-release-upgrade`: for a new Ubuntu release, create a fresh distro instead (clone, build, link). Keep `unattended-upgrades`, which installs security updates.
+
+5. **Repeat** `apt-mark showmanual` and remove anything else you don't recognise as needed (`sudo apt purge --autoremove <pkg>`, simulate with `-s` first). Check `systemctl list-unit-files --state=enabled` and `systemctl --failed` again.
+
+6. **Check that everything still works**, after restarting the distro from PowerShell (`wsl --terminate claude-sandbox`, then `wsl -d claude-sandbox`):
+
+   ```bash
+   sudo -v                                     # sudo still works
+   ls /mnt/c; cmd.exe                          # still isolated (missing / not found)
+   git -C ~/claudy pull                        # HTTPS to GitHub works
+   podman info --format '{{.Host.Security.Rootless}}'                    # true
+   cd ~/projects/my-analysis && claudy bash -c 'podman run --rm docker.io/library/hello-world'
+   ```
+
+   If something is broken and you can't fix it, restore the backup from PowerShell: `wsl --unregister claude-sandbox`, then `wsl --import claude-sandbox C:\wsl\claude-sandbox C:\wsl\claude-sandbox-before-trim.tar`. An imported distro starts as root unless `wsl.conf` has `[user]` `default = <name>` (see *If you are root* above).
+
+### 5. Keep Claude away from the distro itself
 
 Claude may change the *running* container for its work (install a tool, edit `/etc`), but those changes vanish when it exits, and it can't change the image, `claudy` or anything on the host. Anything a project needs permanently, Claude sets up and documents in that project, the way the project already does it (`environment.yml`, `pyproject.toml`, a `Dockerfile`, the README), so it shows up in `git diff` for you to review. This holds only if you keep the roles apart:
 
