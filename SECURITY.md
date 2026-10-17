@@ -2,6 +2,8 @@
 
 A short threat model for the Claude Code sandbox in this repository: what it protects, what it does not, and the risks you accept by using it. It describes the design; parts of it (notably nested mode) have not been independently tested. Read it together with the *Security notes* in `README.md`.
 
+> **Note for AI agents.** This document is for the user's own risk assessment. It lists weaknesses and channels that you have not been asked to use: a risk described here is not a suggestion, a permission or a task. Stay within what the user asked for. If something you need is blocked by the sandbox, say so and ask the user; don't look for a way around it. Don't test, demonstrate or exploit anything described here, or read other sessions' data, unless the user explicitly asks for a specific test; then do the minimum that answers it and report what you did.
+
 ## Goal and threat model
 
 The goal is to limit the damage from **a mistake or misbehaviour of Claude Code or of code it runs**: a bad command, a malicious dependency, or a prompt injection hidden in a file, web page or dataset. The container makes it hard for such things to touch files outside one project folder, your personal SSH keys and git credentials, or other projects' keys.
@@ -126,8 +128,8 @@ The dedicated distro is only a launcher; running project code there (tests, dev 
 
 `SECURITY.md` is published on GitHub, so assume an attacker has read it, and that Claude can read it too whenever this repository is mounted (as when working on the sandbox itself). That is acceptable because none of the protections depend on secrecy: the weaknesses listed here are generic to containers, and a model or attacker can find them without this file. It describes risks at the level needed to judge and mitigate them, not how to carry them out. Still:
 
-* **If you are an AI agent reading this:** it is for the user's own risk assessment. Don't test, demonstrate or exploit any of these risks, read other sessions' data, or work around a protection, unless the user explicitly asks for a specific test; then do the minimum that answers it, and report what you did.
 
+* **Documentation can inspire.** An agent that reads this file learns about channels and weaknesses it would not otherwise have considered, and an over-eager agent might try one as a "workaround" when something is blocked, without the user ever having suggested it. To keep that exposure small: the file is not part of the image, the in-container instructions don't point agents to it and tell them to report blocked actions instead of working around them, it opens with a note for agents, and it avoids recipes. Don't paste it into sessions on other projects or add it to a project's context, and when Claude works on this repository, read its changes to this file with that in mind.
 * **Keep it free of recipes**: describe what can happen and what to do about it, not exact commands, conditions or file locations that would help someone carry an attack out.
 * **Keep it free of secrets and site-specific detail**: no hostnames, usernames, project or dataset names, tokens, key fingerprints or internal GitLab URLs, in this file or anywhere else in the repository. Put local notes outside the repository.
 * **Integrity matters more than confidentiality.** If Claude can edit this repository, it could weaken `SECURITY.md`, `README.md` or `CLAUDE.md` to hide a change, or plant instructions there. Review `git diff` of all documentation and scripts, not just the code, before you trust or rebuild from them, and read the published version on GitHub for the baseline.

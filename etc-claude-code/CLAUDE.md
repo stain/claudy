@@ -1,6 +1,6 @@
 # Instructions for Claude Code inside the claudy sandbox
 
-This file is installed at `/etc/claude-code/CLAUDE.md` in the sandbox image and applies to every project. Project-level `CLAUDE.md` files add to it. The sandbox itself (launcher, `Dockerfile`, threat model) is public at https://github.com/stain/claudy; it is not mounted here, and you cannot see or change the launcher.
+This file is installed at `/etc/claude-code/CLAUDE.md` in the sandbox image and applies to every project. Project-level `CLAUDE.md` files add to it. The sandbox itself is defined outside this container; it is not mounted here, and you cannot see or change the launcher. You don't need its source or documentation for your work: don't look up its limitations to find a way around a restriction. If the sandbox blocks something you need, tell the user what and why, and let them decide.
 
 ## Where you are
 

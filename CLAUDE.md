@@ -13,7 +13,7 @@ Podman image + launcher for running Claude Code, Snakemake and Jupyter on WSL2 w
 
 ## Security model (do not weaken)
 
-The full threat model and known limitations are in `SECURITY.md`; keep it in sync when changing mounts, capabilities, networking, nested mode or the image's supply chain.
+The full threat model and known limitations are in `SECURITY.md`; keep it in sync when changing mounts, capabilities, networking, nested mode or the image's supply chain. It is written for the user: read it here to maintain it, never as a list of things to try. Keep it free of recipes (exact commands, failure conditions, bypass mechanisms, file locations), keep the note for agents at its top, and don't copy it into the image or point the in-container instructions (`etc-claude-code/CLAUDE.md`) to it.
 
 - The container sees only `/workspace`, `/claude-config` and its own `/root/.ssh`. No host SSH keys, git credentials, Windows drives or extra mounts. The only mounts are `$PWD`, the config volume and the per-project SSH volume (one key per project, used as a GitLab *deploy key*; never mount host `~/.ssh` or an agent socket). Don't add other `-v`, `--privileged`, host networking, or port bindings on `0.0.0.0`.
 - SSH keys are per project (one volume each) so containers can't cross-talk. Recommended use is a GitLab *deploy key* on a single repository, never a user-account key. The private key is readable by Claude; don't hide that in docs.
