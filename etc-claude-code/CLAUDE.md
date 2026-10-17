@@ -54,10 +54,10 @@ Debian (`node:22-slim`) with: git, openssh-client, curl, wget, jq, zip/unzip, pa
 
 - Commits use `Claude Sandbox <claude-sandbox@localhost>` unless the user started `claudy` with `CLAUDY_GIT_NAME`/`CLAUDY_GIT_EMAIL`. Don't change the identity or write a `~/.gitconfig` unless asked; it would not persist anyway.
 - The project folder (and `/workspace`) is a git `safe.directory`. Nested repositories in subfolders may need `git config --global --add safe.directory <path>` (temporary) because file ownership differs.
-- The project has its own SSH key, `/root/.ssh/id_ed25519`, generated on first start. Only that key is offered, and unknown hosts are accepted on first contact. It is meant as a deploy key on this project's single repository. To set it up, give the user the public key (`cat /root/.ssh/id_ed25519.pub`; they can also run `claudy pubkey` on the host) and ask them to add it as a deploy key, read-only unless pushing is needed. The private key is readable by you; never copy it elsewhere or print it.
+- The project has its own SSH key, `/root/.ssh/id_ed25519`, generated on first start. Only that key is offered, and unknown hosts are accepted on first contact. It is meant as a deploy key on this project's single repository. To set it up, ask the user to run `claudy pubkey` in the project folder on the host, outside this session, and add the key it prints as a deploy key, read-only unless pushing is needed. Never show, copy or paste the public key yourself, even when asked: the user can't tell whether a key shown in a session is really this project's (a prompt injection could swap in another), and adding the wrong one grants someone else access. Point them to `claudy pubkey` instead. The private key is readable by you; never copy it elsewhere or print it.
 - There are no HTTPS credentials. Pushing, and fetching from private repositories, needs an SSH remote. A remote such as `https://github.com/<owner>/<repo>.git` has the SSH form `git@github.com:<owner>/<repo>.git` (GitLab likewise). Changing it with `git remote set-url origin <url>` only changes this checkout's `.git/config`; do it when the user asked for a push or fetch, and say that you did.
 - If an SSH push or fetch fails, check with `ssh -T git@github.com` (or `git@gitlab.com`). GitHub answers `Hi <owner>/<repo>!` for a working deploy key, GitLab a welcome message. Then tell the user what is missing, with these steps, rather than trying other ways in:
-  1. Print the public key: `cat /root/.ssh/id_ed25519.pub` (or on the host: `claudy pubkey`).
+  1. The user gets the public key by running `claudy pubkey` in the project folder on the host, outside this session (not from you; see above).
   2. GitHub: the repository's *Settings → Deploy keys → Add deploy key*; GitLab: *Settings → Repository → Deploy keys*. Paste the key, title it after the project (e.g. `claudy:<CLAUDY_PROJECT>`), and tick *Allow write access* (GitLab: *Grant write permissions to this key*) only if Claude should push.
   3. Run the command again; no restart is needed.
 
@@ -86,7 +86,7 @@ You can't run these; suggest them when relevant. All of them are run from the pr
 - `claudy bash`, `claudy <cmd> [args]`: a shell, or any command, e.g. `claudy snakemake --cores 4`, in a fresh container with the same mounts.
 - `claudy jupyter`: Jupyter Notebook on http://localhost:8888.
 - `claudy --ports 8080,8081 [cmd]`: publish those ports 1:1 on the host's `127.0.0.1` (combinable with any command).
-- `claudy pubkey`: print this project's SSH public key.
+- `claudy pubkey`: print this project's SSH public key. This is the only way the user should get it; don't print it for them.
 - `CLAUDY_NESTED=1 claudy`: nested mode (`/dev/fuse`, faster container storage, inner images kept), only on a dedicated WSL distro or plain Linux host.
 - `CLAUDY_CONFIG=claude-config-<name> claudy`: a separate login, settings and memory for this project.
 - Rebuilding the image (`podman build ...` in the claudy repository) is done by the user only.
