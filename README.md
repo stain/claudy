@@ -268,6 +268,14 @@ notepad new-claudy-distro.ps1
 powershell -ExecutionPolicy Bypass -File .\new-claudy-distro.ps1 -User yourname
 ```
 
+**Read the script before you run it.** It is a single commented text file: the header (shown by `Get-Help .\new-claudy-distro.ps1 -Full`) lists its seven steps, what it changes on Windows (only the new distro) and what it downloads, and each step in the body says what it does and why. In particular, check that:
+
+* the only download source it uses is this repository on GitHub (`-RepoUrl`), apart from the Ubuntu image and packages and what the `Dockerfile` fetches;
+* the bash sections (`$base`, `$trim`, `$check`, `$build`) match the manual steps 1 to 5 below, which explain the same settings in more detail;
+* nothing in it touches Windows beyond `wsl.exe` creating and starting the new distro.
+
+If anything is unclear or differs from this README, don't run it; follow the manual steps instead, or ask.
+
 **Warning:** the script runs as you on Windows and as root inside the new distro, and `-ExecutionPolicy Bypass` skips the only check Windows would do, so reading it is the check. Only take it from this repository on GitHub, over HTTPS as above, not from a fork, a mirror, a link someone sent you, or a copy in a WSL folder or project (`\\wsl.localhost\...`) that Claude or a container could have edited. To run exactly the version you reviewed, replace `main` in the URL with a commit hash from the GitHub history.
 
 Options: `-Branch` (default `main`; the branch of this repository to check out and build, e.g. to test a pull request), `-Name` (default `claude-sandbox`), `-Distro` (default `Ubuntu-26.04`), `-Location` (folder for the virtual disk), `-SkipTrim`, `-SkipBuild`. It refuses to touch an existing distro of the same name. Afterwards, back up the result (`wsl --export claude-sandbox claude-sandbox.tar`) and continue with *Keep Claude away from the distro itself* below. The manual steps follow.

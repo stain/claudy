@@ -3,17 +3,62 @@
     Create a dedicated, trimmed WSL distro for claudy (README: "Dedicated WSL distro").
 
 .DESCRIPTION
-    Runs on Windows. Installs a new Ubuntu WSL distro under its own name, creates your Linux
-    user, writes /etc/wsl.conf (systemd on, no Windows drives, no interop), installs Podman
-    and git, removes packages the sandbox host doesn't need, checks the isolation, then
-    clones claudy over HTTPS, builds the image and links ~/bin/claudy.
+    Runs on Windows, as your normal Windows user. Read the whole script before running it:
+    it is plain text, and every step is commented. In order, it:
 
-    Everything inside the distro is done by bash scripts embedded below and piped into
-    wsl.exe, so the distro never needs access to Windows files. Read them before running.
-    The package lists match the README ("Trim the distro"); keep both in sync.
+      1. Checks the WSL version and that no distro of that name exists yet.
+      2. Installs a fresh Ubuntu distro under its own name (wsl --install --no-launch).
+      3. As root in the new distro ("Base setup"): creates your Linux user, writes
+         /etc/wsl.conf (systemd on, no Windows drives, no Windows programs), installs a
+         boot-time service that removes WSL's handler for Windows programs, installs
+         Podman and git, and adds the guard rails (apt pin against dev tools and SSH,
+         shell prompt marker and welcome guide, /tmp and /dev/shm noexec).
+      4. Asks you for the new user's Linux password (needed for sudo).
+      5. As root ("Trim"): removes packages the launcher doesn't need, never touching a
+         keep list or Essential/required packages.
+      6. Restarts the distro and checks the isolation; stops if a check fails.
+      7. As your user ("Clone and build"): clones claudy over HTTPS, builds the image and
+         links ~/bin/claudy.
+
+    What it changes on Windows: it only registers the new WSL distro (its virtual disk
+    goes to WSL's default folder or -Location). It doesn't change Windows settings, the
+    registry, other distros or your files, and doesn't ask for administrator rights.
+
+    What it downloads: the Ubuntu image (through wsl.exe), Ubuntu packages (apt, inside
+    the distro), the claudy repository from -RepoUrl/-Branch (GitHub by default), and,
+    while building the image, its base image, Miniforge and Claude Code (see Dockerfile).
+
+    Everything inside the distro is done by the bash scripts embedded below ($base,
+    $trim, $check, $build), piped into wsl.exe, so the distro never needs access to
+    Windows files. The package lists and guard rails match the README ("Trim the distro",
+    "Guard rails"); keep both in sync.
 
 .PARAMETER User
     Linux username to create (lowercase). You are asked for its password; sudo needs it.
+    It doesn't have to match your Windows user name.
+
+.PARAMETER Name
+    Name of the new WSL distro. Must not exist yet (the script refuses to touch an
+    existing distro).
+
+.PARAMETER Distro
+    WSL distribution to install, as listed by 'wsl --list --online'. The trim lists are
+    written for Ubuntu-26.04.
+
+.PARAMETER Location
+    Folder for the distro's virtual disk; WSL chooses one if omitted.
+
+.PARAMETER RepoUrl
+    HTTPS URL of the claudy repository to clone. Leave the default unless you know why.
+
+.PARAMETER Branch
+    Branch of claudy to check out and build, e.g. to test a pull request before it is merged.
+
+.PARAMETER SkipTrim
+    Don't remove packages (not recommended).
+
+.PARAMETER SkipBuild
+    Don't clone claudy or build the image.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\new-claudy-distro.ps1 -User alice
@@ -52,6 +97,7 @@ $ErrorActionPreference = 'Stop'
 $env:WSL_UTF8 = '1'                                         # wsl.exe prints UTF-8, not UTF-16
 $OutputEncoding = New-Object System.Text.UTF8Encoding $false  # text piped to wsl.exe
 
+# Run wsl.exe and stop the script if it fails
 function Invoke-Wsl {
     & wsl.exe @args
     if ($LASTEXITCODE -ne 0) { throw "wsl.exe $($args -join ' ') failed (exit code $LASTEXITCODE)" }
@@ -66,6 +112,7 @@ function Invoke-InDistro([string]$As, [string]$Title, [string]$Script) {
 }
 
 # --- Checks ---------------------------------------------------------------------------
+# 'wsl --install --name' needs WSL 2.4.4 or newer; and never overwrite an existing distro.
 
 $versionText = (& wsl.exe --version 2>$null) -join "`n"
 if ($versionText -match '(\d+)\.(\d+)\.(\d+)') {
@@ -83,6 +130,8 @@ if ($existing -contains $Name) {
 }
 
 # --- Install --------------------------------------------------------------------------
+# --no-launch: don't open the new distro yet; Ubuntu's own first-start setup runs later, the
+# first time you open it, and finds the user this script creates.
 
 Write-Host "==> Installing $Distro as '$Name'" -ForegroundColor Cyan
 $installArgs = @('--install', '-d', $Distro, '--name', $Name, '--no-launch')
@@ -95,12 +144,15 @@ if ($existing -notcontains $Name) {
 }
 
 # --- Base setup (root) ----------------------------------------------------------------
+# The bash script between @' and '@ runs as root inside the new distro. __USER__ is replaced
+# by -User before it is piped in (safe: -User is validated to [a-z0-9_-] above).
 
 $base = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 user='__USER__'
 
+# Your Linux user, in the sudo group (you administer the distro with it).
 # UID 1000 is what Ubuntu's first-start setup expects; it then skips creating a user
 if ! id "$user" >/dev/null 2>&1; then
     if getent passwd 1000 >/dev/null; then
@@ -111,6 +163,8 @@ if ! id "$user" >/dev/null 2>&1; then
 fi
 usermod -aG sudo "$user"
 
+# WSL settings, applied when the distro restarts (step 6): systemd, no Windows drives under
+# /mnt, no starting Windows programs, and your user as the default.
 cat > /etc/wsl.conf <<EOF
 [boot]
 systemd = true
@@ -129,8 +183,8 @@ appendWindowsPath = false
 default = $user
 EOF
 
-# With interop disabled, WSL still registers the WSLInterop binfmt handler, and it also fires
-# for .exe files started inside containers. Remove it on every boot.
+# With interop disabled, WSL still registers its handler for Windows programs. Remove it on
+# every boot (README step 2; why: SECURITY.md, "WSL2 is not a virtual machine boundary").
 cat > /etc/systemd/system/wsl-remove-interop.service <<'EOF'
 [Unit]
 Description=Remove the WSL interop binfmt handler (interop is disabled in /etc/wsl.conf)
@@ -146,6 +200,8 @@ EOF
 mkdir -p /etc/systemd/system/multi-user.target.wants
 ln -sfn /etc/systemd/system/wsl-remove-interop.service /etc/systemd/system/multi-user.target.wants/wsl-remove-interop.service
 
+# Security updates first, then only what the launcher needs: git (to update claudy), editors,
+# sudo, automatic security updates, and rootless Podman with its helpers.
 apt-get update
 apt-get -y full-upgrade
 apt-get install -y --no-install-recommends \
@@ -213,6 +269,7 @@ if [ ! -e "$_claudy_host_welcome" ]; then
     mkdir -p "${_claudy_host_welcome%/*}" && : > "$_claudy_host_welcome"
 fi
 EOF
+# Load it in every interactive bash shell (once, even if this script runs again)
 grep -qxF '. /etc/claudy-host.bashrc' /etc/bash.bashrc || printf '%s\n' '. /etc/claudy-host.bashrc' >> /etc/bash.bashrc
 
 # /tmp, /dev/shm and /run/shm (WSL mounts it separately) noexec on every boot (a bind mount keeps /tmp's contents if it is not
@@ -236,6 +293,7 @@ printf '%s\n' 'APT::ExtractTemplates::TempDir "/var/tmp";' > /etc/apt/apt.conf.d
 '@ -replace '__USER__', $User
 Invoke-InDistro root 'Creating user, writing /etc/wsl.conf, installing Podman and git' $base
 
+# Interactive: passwd asks you twice. The password stays inside the distro; three attempts.
 Write-Host "==> Set the Linux password for '$User' (needed for sudo; unrelated to Windows)" -ForegroundColor Cyan
 for ($i = 1; $i -le 3; $i++) {
     & wsl.exe -d $Name -u root -- passwd $User
@@ -244,6 +302,8 @@ for ($i = 1; $i -le 3; $i++) {
 }
 
 # --- Trim (root) ----------------------------------------------------------------------
+# Removes what a launcher-only host doesn't need (README step 4). Every removal is simulated
+# first; anything that would take a keep-listed or Essential/required package along is kept.
 
 $trim = @'
 set -euo pipefail
@@ -322,6 +382,9 @@ if (-not $SkipTrim) {
 }
 
 # --- Restart and check isolation ------------------------------------------------------
+# Restarting applies /etc/wsl.conf and starts the boot services. The check runs as your user
+# and fails the script if Windows drives or interop are still there, /tmp etc. aren't
+# noexec, or Podman isn't rootless.
 
 Write-Host "==> Restarting '$Name' so /etc/wsl.conf takes effect" -ForegroundColor Cyan
 Invoke-Wsl --terminate $Name
@@ -347,6 +410,8 @@ exit "$fail"
 Invoke-InDistro $User 'Checking isolation' $check
 
 # --- Clone and build (user) -----------------------------------------------------------
+# As your user: clone claudy (unless already there), build the image (downloads the base
+# image, Miniforge and Claude Code), link the launcher into ~/bin and create ~/projects.
 
 $build = @'
 set -euo pipefail
