@@ -408,7 +408,7 @@ The list below matches a fresh `Ubuntu-26.04` install from `wsl --install` (abou
      build-essential xauth byobu screen rsyslog openssh-client rsync wget bc eatmydata
    )
    mapfile -t remove < <(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' "${meta[@]}" "${extra[@]}" 2>/dev/null | awk '$1 == "ii" { print $2 }')
-   sudo apt-get -s purge --autoremove "${remove[@]}" | grep -E '^(Purg|Remv)' | less
+   sudo apt-get -s purge --autoremove "${remove[@]}" | grep -E '^(Purg|Remv) ' | less
    sudo apt-get purge --autoremove "${remove[@]}"
    sudo apt autoremove --purge                 # anything else left unused
    sudo apt purge '~c'                         # leftover config of removed packages
