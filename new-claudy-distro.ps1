@@ -197,6 +197,11 @@ Start a project from a git repository (one folder per repository):
   claudy                                            # Claude Code in the project
 
 Other commands: claudy bash, claudy jupyter, claudy --ports 8080 <command>
+
+Containers for your project run inside claudy, not on this host:
+  claudy bash -c 'podman run --rm docker.io/library/hello-world'
+  CLAUDY_NESTED=1 claudy        # faster storage, images kept per project
+
 Don't put SSH keys or tokens in this distro, and never give Claude the sudo password.
 HELP
     printf 'Files from Windows: \\\\wsl.localhost\\%s\\home\\%s\\projects\n' "${WSL_DISTRO_NAME:-<distro>}" "$USER"
