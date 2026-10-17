@@ -386,7 +386,7 @@ The list below matches a fresh `Ubuntu-26.04` install from `wsl --install` (abou
 
    Don't try to remove what is left by force: `cloud-init`, `ubuntu-insights`, `chrony`, `ethtool`, `gpg`, `dbus-x11`, `xdg-user-dirs` and the `python3-*` packages stay because `wsl-setup` or the packages from step 3 depend on them, and Essential packages (`coreutils`, `rust-coreutils`, `gcc-*-base` and other libraries) are part of the base system. Removing them takes `wsl-setup` along, which WSL needs.
 
-   `openssh-client` is not needed because the distro clones this repository over HTTPS. Without `ubuntu-release-upgrader-core` there is no `do-release-upgrade`: for a new Ubuntu release, create a fresh distro instead (clone, build, link). Keep `unattended-upgrades`, which installs security updates.
+   `openssh-client` is removed on purpose: the distro clones this repository over HTTPS, and it must not hold SSH keys (see *Keep Claude away from the distro itself*). Without `ubuntu-release-upgrader-core` there is no `do-release-upgrade`: for a new Ubuntu release, create a fresh distro instead (clone, build, link). Keep `unattended-upgrades`, which installs security updates.
 
 5. **Repeat** `apt-mark showmanual` and remove anything else you don't recognise as needed (`sudo apt purge --autoremove <pkg>`, simulate with `-s` first). Check `systemctl list-unit-files --state=enabled` and `systemctl --failed` again.
 
@@ -413,6 +413,8 @@ Claude may change the *running* container for its work (install a tool, edit `/e
 * **Nested containers are Claude's workspace.** Inside the container it can pull images, build its own images and run containers for development work. That inner storage is the per-project `claude-containers-*` volume, separate from the outer image and from your host's Podman images, so it can't modify the `claudy` image. Remove it with `podman volume rm` to start clean.
 * **Keep `~/claudy` out of the mounted project folder** and never run `claudy` from inside it (or from its parent directory), because the project folder is writable by Claude, and `claudy`, `Dockerfile` and `entrypoint.sh` are executed with your rights.
 * **Don't put credentials for this distro into a project**: no `~/.ssh` keys, tokens or `.env` files holding secrets you wouldn't give to Claude.
+* **No SSH keys or git credentials in the distro, and no `ssh` client.** The trim removes `openssh-client` on purpose, and the distro only fetches this repository over HTTPS. Git access for projects belongs to the per-project deploy keys inside `claudy` containers, one key per project and repository. A key, SSH agent, token or credential helper (`~/.git-credentials`) in the distro itself would reach every repository it is allowed on, and would be the first thing an escape from a container finds, which undoes the point of separate keys. Don't reinstall `openssh-client` or add keys there; push and pull projects from inside `claudy`, and maintain this repository (push, pull requests) from your normal environment, not from this distro.
+* **Don't use the distro to run or test your applications.** Project code, test suites, dev servers, notebooks and `make` run in the distro shell would run as your user outside the container, with the access the sandbox is meant to keep from them, and would need the toolchains the trim removed. Run them inside `claudy` (`claudy bash`, `claudy --ports ...`, `claudy jupyter`). The distro is only a launcher: Podman, git for this repository, and an editor.
 
 ## Updating Claude Code
 
