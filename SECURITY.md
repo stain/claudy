@@ -8,6 +8,8 @@ The goal is to limit the damage from **a mistake or misbehaviour of Claude Code 
 
 It is not designed to stop a determined attacker with a kernel exploit, to keep data from leaving the machine, or to make untrusted software safe to run.
 
+**It is not isolation between Claude sessions or code bases.** The purpose is to reduce the blast radius of accidental or misleading instructions and over-eager agents, not to keep projects that must not see each other apart. All sessions run as the same host user on the same kernel and, by default, share one Claude config volume holding every session's transcripts, memory, settings and the login. One session can read and rewrite what another left there (see *The Claude login is exposed to the container*). Real isolation between code bases needs, at the least, separate virtual machines, each with its own keys and logins; a per-project config volume (`CLAUDY_CONFIG`) is only a mitigation.
+
 ## What is protected
 
 | Asset | Protection |
@@ -26,7 +28,11 @@ Network access is unrestricted. Anything the container can read (the project, th
 ### The Claude login is exposed to the container
 The subscription login lives in the `claude-config` volume, readable by everything in the container. The volume is shared by all projects, so it also holds other projects' transcripts. Because every project is mounted at the same path (`/workspace`), they also share a single Claude memory folder, so memories from one project are loaded into sessions in another. A compromised session could take the token and use your quota.
 
-The volume is also **writable and persistent**, so it is a channel between sessions and projects: settings and hooks (`settings.json`, which can run commands in every later session), and memory files are read by later sessions in other projects. A prompt injection in one project can plant instructions or hooks that act in another. Use `CLAUDY_CONFIG=claude-config-<project>` for separation (one login per project), and log out with `podman volume rm claude-config`.
+The volume is also **writable and persistent**, so it is a channel between sessions and projects: settings and hooks (`settings.json`, which can run commands in every later session), and memory files are read by later sessions in other projects. A prompt injection in one project can plant instructions or hooks that act in another. It can also rewrite another session's transcript, which changes what Claude "remembers" when that session is resumed (`--resume`), so the planted instruction then acts with that project's files and deploy key.
+
+Transcripts, `file-history/` and `paste-cache/` keep whatever appeared in a session: a token you pasted, a `.env` file or credential Claude displayed, command output with a password. Every session sharing the volume can read those. Keep secrets out of sessions.
+
+`CLAUDY_CONFIG=claude-config-<project>` gives a project its own volume (one login per project). That is a mitigation: the volumes still belong to your host user, so an escape from any container, or anything else running as you, reads them all. Log out with `podman volume rm claude-config`.
 
 ### The project folder is writable and trusted by you later
 Claude can change anything in `/workspace`: scripts, `Makefile`, notebooks, `.git/hooks`, `environment.yml`, IDE settings. If you later run or open those *outside* the container (a git hook, `make`, a Jupyter notebook on the host, VS Code tasks), the sandbox no longer applies. Review changes (`git diff`, including hooks) before running anything outside.
@@ -113,6 +119,7 @@ The dedicated distro is only a launcher; running project code there (tests, dev 
 | Lasting changes to the image from inside the container | Cross-project influence through the shared `claude-config` volume (hooks, memory) |
 | Unintended access to the Windows drives (with the dedicated distro) | Kernel or runtime escapes, a shared WSL2 kernel; root in the distro can mount the Windows drives |
 | | Supply-chain compromise of the image or conda packages |
+| | Isolation between Claude sessions or code bases that must not see each other (shared config volume, same user and kernel) |
 | | Tampering in `.conda_env`, which persists between sessions and is not in `git diff` |
 
 ## Reporting

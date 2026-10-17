@@ -2,6 +2,10 @@
 
 A container image for running Claude Code, Snakemake and Jupyter where only the current project folder is visible to the container. Claude authenticates with your Claude Team subscription login; no API key is needed.
 
+> **What claudy is for, and what not.** claudy reduces the *blast radius* of an agent that follows accidental or misleading instructions, or is simply over-eager: a wrong `rm`, a prompt injection in a file or web page, a malicious dependency. It keeps such mistakes inside one project folder and away from your own keys, other projects' keys and (with the dedicated WSL distro) your Windows files.
+>
+> It is **not** security isolation between Claude sessions or between code bases that must not see each other. All sessions run as the same user on the same kernel, and by default share one Claude config volume (login, transcripts, memory, settings). Separating them properly needs, at the least, separate virtual machines with separate keys and logins for each. A per-project config (`CLAUDY_CONFIG`, see below) is a mitigation, not isolation. See `SECURITY.md`.
+
 ## Layout
 
 Keep the sandbox definition separate from the projects it runs on, so that Claude can never edit its own container configuration:
@@ -94,13 +98,13 @@ By default every project uses the same `claude-config` volume: one login, and sh
 * settings and hooks (`settings.json`), which run in every later session of every project;
 * the login token itself.
 
-So a prompt injection in one project could read your other projects' conversations, or plant a hook or memory that acts in them. Keeping it shared is fine when the projects belong together: your own work, with data of similar sensitivity. Give a project its own volume when it holds data other projects shouldn't see (confidential or someone else's data), or when it works on untrusted material, such as reviewing third-party code:
+So a prompt injection in one project could read your other projects' conversations, including any secret that ever appeared in them (a token you pasted, a `.env` Claude printed), or plant a hook, memory or edited transcript that acts in them. Rewriting a transcript changes what Claude "remembers" when that session is resumed with `--resume`. Keeping it shared is fine when the projects belong together: your own work, with data of similar sensitivity. Give a project its own volume when it holds data other projects shouldn't see (confidential or someone else's data), or when it works on untrusted material, such as reviewing third-party code:
 
 ```bash
 CLAUDY_CONFIG=claude-config-myproject claudy
 ```
 
-Use the same name every time you start that project (an alias helps), and log in once for it. Decide before the first session: all projects share one transcript and memory folder in the shared volume, so a project's history can't easily be separated out afterwards.
+Use the same name every time you start that project (an alias helps), and log in once for it. This is a mitigation, not isolation: the volumes are still owned by your user, so an escape from any container, or anything else running as you, can read them all. Code bases that must not see each other belong in separate virtual machines with their own keys and logins. Either way, keep secrets out of sessions: don't paste them, and don't have Claude print `.env` files or tokens, because whatever appears ends up in the transcript. Decide before the first session: all projects share one transcript and memory folder in the shared volume, so a project's history can't easily be separated out afterwards.
 
 ## Everyday use
 
