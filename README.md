@@ -82,11 +82,9 @@ claudy                       # Claude Code
 claudy bash                  # a shell in the same environment
 claudy snakemake --cores 4   # any command
 claudy pubkey                # this project's SSH public key
-claudy jupyter               # Jupyter on http://localhost:8888 (use the token URL it prints)
-claudy --ports 8080,5173     # Claude Code, with these ports reachable on http://localhost:<port>
+claudy jupyter               # Jupyter Notebook on http://localhost:8888 (needs notebook in environment.yml, see below)
+claudy --ports 8080,5173     # Claude Code, with these ports reachable on http://localhost:<port> (see below)
 ```
-
-`--ports` (before the command, combinable with any of the above) publishes the listed container ports under the same number on the host's `127.0.0.1`, e.g. to open a dev server Claude started in your browser. The server must listen on `0.0.0.0` inside the container, not `127.0.0.1`. Use ports 1024 or higher (rootless Podman can't publish lower ones by default). Ports can only be chosen at start: to add one, exit and restart `claudy` with it. The container sees the published list in `CLAUDY_PORTS`.
 
 The project's conda environment (`/workspace/.conda_env/bin`) is on `PATH` for every command, so there is no need for `conda activate`. The entrypoint and interactive shells (via `/etc/bash.bashrc`) also activate it when it exists, and `conda activate` works in those shells.
 
@@ -108,6 +106,51 @@ channels:
 ```
 
 The environment is ignored by git automatically; no entry in the project's `.gitignore` is needed.
+
+## Opening ports (`--ports`)
+
+By default no container port is reachable from your machine, so a web app or dev server that Claude starts inside the container can't be opened in your browser. `--ports` publishes the listed ports under the same number on your host's `127.0.0.1`:
+
+```bash
+claudy --ports 8080                  # Claude Code, port 8080 reachable as http://localhost:8080
+claudy --ports 8080,5173 bash        # a shell, two ports
+claudy --ports=3000 --ports 8080     # the option can be repeated
+```
+
+* Put `--ports` before the command; it combines with any command, including `jupyter`.
+* The server must listen on `0.0.0.0` inside the container, not `127.0.0.1`/`localhost` (most dev servers default to localhost), e.g. `python -m http.server 8080 --bind 0.0.0.0`.
+* Use ports 1024 or higher: rootless Podman can't publish lower ones by default, and nested containers can't listen on them.
+* Ports are fixed when the container starts. To add one, exit and restart with it; `claudy --ports 8080 claude --continue` resumes the last conversation. Claude knows this and asks you to restart when it needs a port, explaining why. Anything not saved in the project (temporary installs, background processes) is lost on restart.
+* Inside the container, `CLAUDY_PORTS` lists the published ports.
+* While published, the port is reachable by any program on your machine, including web pages in your browser and, on WSL2, the Windows side. Dev servers rarely have authentication, so publish ports only for the session that needs them. See `SECURITY.md`.
+
+## Jupyter Notebook
+
+The image does not include Jupyter. `claudy jupyter` runs `jupyter notebook` from the project's conda environment, so add `notebook` to the project's `environment.yml`, for example:
+
+```yaml
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - notebook
+  # your analysis packages, e.g.
+  - pandas
+  - matplotlib
+```
+
+Then, from the project folder:
+
+```bash
+claudy jupyter                       # http://localhost:8888 (published automatically), open the token URL it prints
+claudy --ports 8050 jupyter          # also publish 8050, e.g. for a Dash app started from a notebook
+claudy --ports 8888                  # Claude Code with 8888 published, so Jupyter can run alongside Claude
+```
+
+With the last form, start Jupyter inside the session (ask Claude, or run it in a `!` shell command) so that it listens on all interfaces: `jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root`. Ask Claude for the token URL, or run `jupyter server list`; it shows the container's hostname, so open it as `http://localhost:8888/?token=...`. Claude can then work on the same notebooks while you have them open. The server stops when you exit Claude.
+
+Notebooks are saved in the project folder. The Jupyter server runs with the same isolation as Claude (only the project folder, its own SSH key), and anyone with the token URL can run code in the container. Without `notebook` in the environment, `claudy jupyter` fails with `jupyter: not found`.
 
 ## Git, GitLab and GitHub (SSH)
 
@@ -272,4 +315,5 @@ Limits of this isolation:
 
 * **`claude: command not found` / conda errors on start**: check the entrypoint output; a failed `conda env create` stops the container. Delete `.conda_env/` to start from scratch.
 * **The organisation is not offered at login**: check on claude.ai that the browser is signed in with the email your organisation's admin invited, and that the invitation has been accepted.
+* **`jupyter: not found`**: add `notebook` to the project's `environment.yml` (see *Jupyter Notebook*).
 * **Port already in use** (`address already in use` from podman): another `claudy jupyter` or `claudy --ports` session holds it; stop that one or pick another port.
