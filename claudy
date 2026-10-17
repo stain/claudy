@@ -48,10 +48,18 @@ esac
 # The hash of the full path keeps same-named folders apart.
 project=$(basename "$PWD")
 hash=$(printf '%s' "$PWD" | sha256sum | cut -c1-8)
-SSH_VOLUME=${CLAUDY_SSH:-claude-ssh-${project//[^A-Za-z0-9_.-]/_}-$hash}
+project_id=${project//[^A-Za-z0-9_.-]/_}-$hash
+SSH_VOLUME=${CLAUDY_SSH:-claude-ssh-$project_id}
+
+# The project is mounted at its own path, so Claude Code keeps each project's
+# conversations (--continue, --resume) and memory apart. The entrypoint links
+# /workspace to it, so paths written for /workspace keep working.
+PROJECT_DIR=/projects/$project_id
 
 opts=(-it --rm
-  -v "$PWD":/workspace
+  -v "$PWD":"$PROJECT_DIR"
+  --workdir "$PROJECT_DIR"
+  -e CLAUDY_PROJECT_DIR="$PROJECT_DIR"
   -v "$CONFIG_VOLUME":/claude-config
   -v "$SSH_VOLUME":/root/.ssh
   -e CLAUDY_PROJECT="$project")
@@ -116,7 +124,7 @@ if [ "$NESTED" = 1 ]; then
   fi
   # Inner image storage persists per project, in its own volume
   opts+=(--device /dev/fuse --security-opt label=disable
-         -v "claude-containers-${project//[^A-Za-z0-9_.-]/_}-$hash":/var/lib/containers)
+         -v "claude-containers-$project_id":/var/lib/containers)
 fi
 
 if [ "${1:-}" = pubkey ]; then
