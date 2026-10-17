@@ -195,6 +195,7 @@ Notes:
 * The key has no passphrase, and no SSH agent is forwarded.
 * Host keys are recorded on first contact (`StrictHostKeyChecking accept-new`) and kept in the same volume. For a self-hosted GitLab this works the same way.
 * To revoke: delete the deploy key in GitLab, and `podman volume rm` the volume (`podman volume ls` lists them). Removing it makes the next start generate a new key.
+* Keys belong to the WSL distro they were generated in. Replacing or re-creating the distro gives every project a new key; add the new ones and delete the old deploy keys (see *Replacing an existing distro deletes its files*).
 * Commits are authored as `Claude Sandbox <claude-sandbox@localhost>` by default. Override per run:
   `CLAUDY_GIT_NAME="Your Name" CLAUDY_GIT_EMAIL=you@example.org claudy`.
   To change the default, edit the `GIT_*` variables in the `Dockerfile` and rebuild.
@@ -226,7 +227,7 @@ Options: `-Name` (default `claude-sandbox`), `-Distro` (default `Ubuntu-26.04`),
 `wsl --unregister <name>` (needed before reusing a name, or when restoring a backup with `wsl --import`) deletes the distro's whole virtual disk. Nothing inside it survives:
 
 * your projects (`~/projects/...`), including uncommitted changes, unpushed commits, branches and stashes that exist only there, and data files that aren't in git;
-* the Podman volumes: `claude-config` (your Claude login and session history), every project's `claude-ssh-*` key (new keys are generated, so the deploy keys must be added again) and `claude-containers-*` (nested images);
+* the Podman volumes: `claude-config` (your Claude login and session history), every project's `claude-ssh-*` key (new keys are generated, so every deploy key must be added again and the old ones deleted, see below) and `claude-containers-*` (nested images);
 * `~/claudy` and the built images (cheap to recreate).
 
 So before replacing a distro:
@@ -241,7 +242,15 @@ To move projects over directly, from PowerShell (`cmd /c` keeps the pipe binary-
 cmd /c "wsl -d <old> -- tar -C ~ --exclude=.conda_env -cf - projects | wsl -d claude-sandbox -- tar -C ~ -xf -"
 ```
 
-Folder paths stay the same, but the per-project SSH volumes are not copied, so each project gets a new key on its first start (`claudy pubkey`). Log in to Claude again in the new distro.
+Folder paths stay the same, but the per-project SSH volumes are not copied (and should not be: keys stay with the distro they were made in), so each project gets a new key on its first start. Log in to Claude again in the new distro.
+
+**Replacing the distro means replacing the SSH deploy keys.** For every project:
+
+1. In the new distro, run `claudy pubkey` in the project folder and add the key as a deploy key on that repository (see *Git, GitLab and GitHub*), with write access only if Claude should push.
+2. In the repository's deploy key settings, **delete the old distro's key**. It is still valid: it lives on in the old distro and in any `wsl --export` backup of it, which contain the private keys in plain text.
+3. Once everything is moved, `wsl --unregister` the old distro and delete or securely store its backup `.tar`.
+
+GitHub refuses a deploy key that is already used on another repository, and each key is per project, so there is nothing to reuse; deploy keys are named in the repository settings, so give the new one a name that says which distro it belongs to (e.g. `claude-sandbox2 my-analysis`).
 
 ### 1. Create the distro (from PowerShell)
 
