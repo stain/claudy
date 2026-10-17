@@ -98,7 +98,7 @@ By default every project uses the same `claude-config` volume: one login, and sh
 * settings and hooks (`settings.json`), which run in every later session of every project;
 * the login token itself.
 
-So a prompt injection in one project could read your other projects' conversations, including any secret that ever appeared in them (a token you pasted, a `.env` Claude printed), or plant a hook, memory or edited transcript that acts in them. Rewriting a transcript changes what Claude "remembers" when that session is resumed with `--resume`. Keeping it shared is fine when the projects belong together: your own work, with data of similar sensitivity. Give a project its own volume when it holds data other projects shouldn't see (confidential or someone else's data), or when it works on untrusted material, such as reviewing third-party code:
+So a prompt injection in one project could read your other projects' conversations, including any secret that ever appeared in them (a token you pasted, a `.env` Claude printed), or leave instructions (in settings, memory or old conversations) that act in them later. Keeping it shared is fine when the projects belong together: your own work, with data of similar sensitivity. Give a project its own volume when it holds data other projects shouldn't see (confidential or someone else's data), or when it works on untrusted material, such as reviewing third-party code:
 
 ```bash
 CLAUDY_CONFIG=claude-config-myproject claudy
@@ -160,7 +160,7 @@ claudy --ports=3000 --ports 8080     # the option can be repeated
 * Ports are fixed when the container starts. To add one, exit and restart with it; `claudy --ports 8080 claude --continue` resumes the last conversation. Claude knows this and asks you to restart when it needs a port, explaining why. Anything not saved in the project (temporary installs, background processes) is lost on restart.
 * Inside the container, `CLAUDY_PORTS` lists the published ports.
 * While published, the port is reachable by any program on your machine, including web pages in your browser and, on WSL2, the Windows side. Dev servers rarely have authentication, so publish ports only for the session that needs them. See `SECURITY.md`.
-* **Opening the page runs Claude's code in your browser, outside the sandbox.** It can make requests with your browser's logins and reach other `localhost` services (another project's Jupyter shares `localhost` cookies), show fake login pages, or offer downloads that run on Windows. Use a **separate browser profile** for `claudy` pages, logged into nothing and without a password manager or extensions, and don't open files they download. Where you can, let Claude test with `curl` or a headless browser inside the container instead.
+* **Opening the page runs Claude's code in your browser, outside the sandbox.** It can act with your browser's logins, reach other services on your machine (such as another project's Jupyter), show fake login pages, or offer downloads that run on Windows. Use a **separate browser profile** for `claudy` pages, logged into nothing and without a password manager or extensions, and don't open files they download. Where you can, let Claude test with `curl` or a headless browser inside the container instead.
 
 ## Jupyter Notebook
 
@@ -389,7 +389,7 @@ Notes:
 * Keep projects on the distro's own filesystem (`~/projects`). Copy files in and out through `\\wsl.localhost\claude-sandbox\home\youruser` in Windows Explorer.
 * Without interop the login URL cannot open a browser: copy it from the terminal into your Windows browser by hand (the README's login steps already do this).
 * `localhost:8888` for Jupyter is still forwarded to Windows.
-* All WSL2 distros share one Linux kernel and VM. A separate distro keeps your Windows files out of reach of your user, but it is not a separate virtual machine: root in the distro can still mount them (`mount -t drvfs C: /mnt/c`), so the protection depends on nothing reaching root there (see `SECURITY.md`, *WSL2 is not a virtual machine boundary to Windows*). The container can also still reach the network.
+* All WSL2 distros share one Linux kernel and VM. A separate distro keeps your Windows files out of reach of your user, but it is not a separate virtual machine: root in the distro can still mount them, so the protection depends on nothing reaching root there (see `SECURITY.md`, *WSL2 is not a virtual machine boundary to Windows*). The container can also still reach the network.
 * `claudy` and the `Dockerfile` run with your user's rights on the host, so `git pull` only from a source you trust, and read `git diff` of those two files after pulling.
 * `claudy` refuses nested mode on WSL while `/mnt/<drive>` or interop is active. `CLAUDY_ALLOW_UNSAFE_NESTED=1` overrides this; don't.
 
