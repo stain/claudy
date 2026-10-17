@@ -396,12 +396,13 @@ The list below matches a fresh `Ubuntu-26.04` install from `wsl --install` (abou
    meta=(ubuntu-wsl ubuntu-minimal)
 
    # What a fresh Ubuntu-26.04 WSL install still has after autoremove. Not listed on purpose:
-   # cloud-init, ubuntu-insights, chrony, ethtool, gpg, dbus-x11, xdg-user-dirs and python3-*
-   # (wsl-setup or the keep list need them), and Essential/required packages such as
+   # cloud-init, chrony, ethtool, gpg, dbus-x11, xdg-user-dirs and python3-* (wsl-setup or
+   # the keep list need them), and Essential/required packages such as
    # coreutils, rust-coreutils or gcc-*-base.
    extra=(
-     # remote management, telemetry and Windows integration agents
-     snapd landscape-client landscape-common ubuntu-pro-client wsl-pro-service
+     # remote management, telemetry and Windows integration agents (ubuntu-insights is only
+     # recommended by wsl-setup; without it, first start doesn't ask about metrics)
+     snapd landscape-client landscape-common ubuntu-pro-client wsl-pro-service ubuntu-insights
      apport apport-core-dump-handler software-properties-common ubuntu-release-upgrader-core
      motd-news-config show-motd command-not-found python3-wadllib
      # toolchains and extras the sandbox host doesn't need (the container has its own)
@@ -414,7 +415,7 @@ The list below matches a fresh `Ubuntu-26.04` install from `wsl --install` (abou
    sudo apt purge '~c'                         # leftover config of removed packages
    ```
 
-   Don't try to remove what is left by force: `cloud-init`, `ubuntu-insights`, `chrony`, `ethtool`, `gpg`, `dbus-x11`, `xdg-user-dirs` and the `python3-*` packages stay because `wsl-setup` or the packages from step 3 depend on them, and Essential packages (`coreutils`, `rust-coreutils`, `gcc-*-base` and other libraries) are part of the base system. Removing them takes `wsl-setup` along, which WSL needs.
+   Don't try to remove what is left by force: `cloud-init`, `chrony`, `ethtool`, `gpg`, `dbus-x11`, `xdg-user-dirs` and the `python3-*` packages stay because `wsl-setup` or the packages from step 3 depend on them, and Essential packages (`coreutils`, `rust-coreutils`, `gcc-*-base` and other libraries) are part of the base system. Removing them takes `wsl-setup` along, which WSL needs.
 
    `openssh-client` is removed on purpose: the distro clones this repository over HTTPS, and it must not hold SSH keys (see *Keep Claude away from the distro itself*). Without `ubuntu-release-upgrader-core` there is no `do-release-upgrade`: for a new Ubuntu release, create a fresh distro instead (clone, build, link). Keep `unattended-upgrades`, which installs security updates.
 
@@ -437,7 +438,7 @@ The list below matches a fresh `Ubuntu-26.04` install from `wsl --install` (abou
 The distro is only a launcher. Project code, tests and dev servers belong in `claudy` containers (see *Keep Claude away from the distro itself*). Three guard rails make the wrong path fail loudly; `new-claudy-distro.ps1` sets them all up. They stop accidents, not a determined user with `sudo`.
 
 * **apt refuses development tools and SSH.** `/etc/apt/preferences.d/claudy-no-dev-tools.pref` pins `openssh-client`, compilers, `make`, Node.js, `pip`/`venv`, Java, Go, Rust, Ruby, Docker and friends to priority -1, so `sudo apt install nodejs` fails with *Package 'nodejs' has no installation candidate*. apt can't say why, and its message may even suggest another package (such as `nodejs-doc`) as a replacement; `apt-cache policy nodejs` shows the pin (`Candidate: (none)`, priority -1). Python itself stays: `wsl-setup`, netplan and `claudy` (to build its seccomp profile) need it.
-* **The shell reminds you where you are.** Interactive shells show a red `[claudy host]` prompt marker, print a warning when you `cd` into a project under `~/projects`, and answer a missing command with a hint to run it through `claudy` instead.
+* **The shell reminds you where you are.** The first interactive shell prints a short guide to starting a project (again any time with `claudy-help`). Interactive shells show a red `[claudy host]` prompt marker, print a warning when you `cd` into a project under `~/projects`, and answer a missing command with a hint to run it through `claudy` instead.
 * **`/tmp`, `/dev/shm` and `/run/shm` are mounted `noexec`** at every boot (`claudy-tmp-noexec.service`; WSL mounts `/run/shm` as a separate tmpfs), so a binary downloaded or unpacked there can't be started. apt is told to use `/var/tmp` for package configuration scripts, which would otherwise fail. `~/projects` is deliberately *not* `noexec`: the container's `/workspace` is a bind mount of it and would inherit the flag, breaking every script and conda program inside `claudy`.
 
 To set them up by hand, as root (`sudo -i`):
@@ -474,6 +475,28 @@ command_not_found_handle() {
     printf '%s: not installed on the claudy host on purpose; run it in the sandbox: claudy %s\n' "$1" "$*" >&2
     return 127
 }
+claudy-help() {
+    cat <<'HELP'
+This WSL distro only starts claudy. Your code, tests and tools run inside claudy
+containers, never in this shell.
+
+Start a project from a git repository (one folder per repository):
+  mkdir -p ~/projects/NAME && cd ~/projects/NAME
+  claudy pubkey                                     # add this key as a deploy key on that repository
+  claudy git clone git@github.com:OWNER/REPO.git .  # note the final "."
+  claudy                                            # Claude Code in the project
+
+Other commands: claudy bash, claudy jupyter, claudy --ports 8080 <command>
+Don't put SSH keys or tokens in this distro, and never give Claude the sudo password.
+HELP
+    printf 'Files from Windows: \\\\wsl.localhost\\%s\\home\\%s\\projects\n' "${WSL_DISTRO_NAME:-<distro>}" "$USER"
+    printf 'Show this again: claudy-help    Full guide: ~/claudy/README.md\n'
+}
+_claudy_host_welcome=${XDG_CACHE_HOME:-$HOME/.cache}/claudy/welcome-shown
+if [ ! -e "$_claudy_host_welcome" ]; then
+    claudy-help
+    mkdir -p "${_claudy_host_welcome%/*}" && : > "$_claudy_host_welcome"
+fi
 EOF
 grep -qxF '. /etc/claudy-host.bashrc' /etc/bash.bashrc || printf '%s\n' '. /etc/claudy-host.bashrc' >> /etc/bash.bashrc
 

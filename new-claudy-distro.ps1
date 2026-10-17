@@ -185,6 +185,28 @@ command_not_found_handle() {
     printf '%s: not installed on the claudy host on purpose; run it in the sandbox: claudy %s\n' "$1" "$*" >&2
     return 127
 }
+claudy-help() {
+    cat <<'HELP'
+This WSL distro only starts claudy. Your code, tests and tools run inside claudy
+containers, never in this shell.
+
+Start a project from a git repository (one folder per repository):
+  mkdir -p ~/projects/NAME && cd ~/projects/NAME
+  claudy pubkey                                     # add this key as a deploy key on that repository
+  claudy git clone git@github.com:OWNER/REPO.git .  # note the final "."
+  claudy                                            # Claude Code in the project
+
+Other commands: claudy bash, claudy jupyter, claudy --ports 8080 <command>
+Don't put SSH keys or tokens in this distro, and never give Claude the sudo password.
+HELP
+    printf 'Files from Windows: \\\\wsl.localhost\\%s\\home\\%s\\projects\n' "${WSL_DISTRO_NAME:-<distro>}" "$USER"
+    printf 'Show this again: claudy-help    Full guide: ~/claudy/README.md\n'
+}
+_claudy_host_welcome=${XDG_CACHE_HOME:-$HOME/.cache}/claudy/welcome-shown
+if [ ! -e "$_claudy_host_welcome" ]; then
+    claudy-help
+    mkdir -p "${_claudy_host_welcome%/*}" && : > "$_claudy_host_welcome"
+fi
 EOF
 grep -qxF '. /etc/claudy-host.bashrc' /etc/bash.bashrc || printf '%s\n' '. /etc/claudy-host.bashrc' >> /etc/bash.bashrc
 
@@ -234,12 +256,13 @@ keep=(apt sudo sudo-rs systemd systemd-sysv systemd-resolved init
 meta=(ubuntu-wsl ubuntu-minimal)
 
 # What a fresh Ubuntu-26.04 WSL install still has after autoremove. Not listed on purpose:
-# cloud-init, ubuntu-insights, chrony, ethtool, gpg, dbus-x11, xdg-user-dirs and python3-*
-# (wsl-setup or the keep list need them), and Essential/required packages such as
+# cloud-init, chrony, ethtool, gpg, dbus-x11, xdg-user-dirs and python3-* (wsl-setup or
+# the keep list need them), and Essential/required packages such as
 # coreutils, rust-coreutils or gcc-*-base.
 extra=(
-  # remote management, telemetry and Windows integration agents
-  snapd landscape-client landscape-common ubuntu-pro-client wsl-pro-service
+  # remote management, telemetry and Windows integration agents (ubuntu-insights is only
+  # recommended by wsl-setup; without it, first start doesn't ask about metrics)
+  snapd landscape-client landscape-common ubuntu-pro-client wsl-pro-service ubuntu-insights
   apport apport-core-dump-handler software-properties-common ubuntu-release-upgrader-core
   motd-news-config show-motd command-not-found python3-wadllib
   # toolchains and extras the sandbox host doesn't need (the container has its own)
@@ -337,6 +360,6 @@ Write-Host ''
 Write-Host "Done. '$Name' is ready." -ForegroundColor Green
 Write-Host "  Back it up now:  wsl --export $Name $Name.tar"
 Write-Host "  Start it:        wsl -d $Name"
-Write-Host "  Then:            mkdir -p ~/projects/my-analysis && cd ~/projects/my-analysis && claudy"
+Write-Host "  The first shell shows how to start a project (again later: claudy-help)."
 Write-Host "  Projects are in \\wsl.localhost\$Name\home\$User\projects (Windows Explorer)."
 Write-Host "  For Podman inside with /dev/fuse:  CLAUDY_NESTED=1 claudy"
