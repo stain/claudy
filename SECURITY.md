@@ -28,11 +28,45 @@ Network access is unrestricted. Anything the container can read (the project, th
 ### The Claude login is exposed to the container
 The subscription login lives in the `claude-config` volume, readable by everything in the container. The volume is shared by all projects, so it also holds other projects' transcripts. Because every project is mounted at the same path (`/workspace`), they also share a single Claude memory folder, so memories from one project are loaded into sessions in another. A compromised session could take the token and use your quota.
 
-The volume is also **writable and persistent**, so it is a channel between sessions and projects: settings and hooks (`settings.json`, which can run commands in every later session), and memory files are read by later sessions in other projects. A prompt injection in one project can plant instructions or hooks that act in another. It can also rewrite another session's transcript, which changes what Claude "remembers" when that session is resumed (`--resume`), so the planted instruction then acts with that project's files and deploy key.
+The volume is also **writable and persistent**, so it is a channel between sessions and projects (details in *Cross-talk and leakage through the shared config volume* below): settings and hooks (`settings.json`, which can run commands in every later session), and memory files are read by later sessions in other projects. A prompt injection in one project can plant instructions or hooks that act in another. It can also rewrite another session's transcript, which changes what Claude "remembers" when that session is resumed (`--resume`), so the planted instruction then acts with that project's files and deploy key.
 
 Transcripts, `file-history/` and `paste-cache/` keep whatever appeared in a session: a token you pasted, a `.env` file or credential Claude displayed, command output with a password. Every session sharing the volume can read those. Keep secrets out of sessions.
 
 `CLAUDY_CONFIG=claude-config-<project>` gives a project its own volume (one login per project). That is a mitigation: the volumes still belong to your host user, so an escape from any container, or anything else running as you, reads them all. Log out with `podman volume rm claude-config`.
+
+### Cross-talk and leakage through the shared config volume
+Every session that uses the same config volume (the default) reads and writes the same files, while it runs and long after. Claude Code decides what it keeps there, and the layout changes between versions; in a session in October 2026 the volume held:
+
+| In `/claude-config` | What it holds |
+|---|---|
+| `.credentials.json` | the Claude login token |
+| `.claude.json`, `backups/` | account and per-project state, and MCP server definitions (commands and their environment, possibly tokens) |
+| `projects/-workspace/*.jsonl` | full transcripts of every session: messages, every file Claude read or wrote, every command and its output. All projects are mounted at `/workspace`, so all of them share this one folder |
+| `projects/-workspace/memory/` | Claude's memory, loaded into later sessions |
+| `history.jsonl` | the prompts you typed, across all sessions |
+| `file-history/` | earlier versions of files Claude edited, from every project |
+| `paste-cache/` | text you pasted into sessions |
+| `shell-snapshots/`, `session-env/` | shell state of sessions, which can include environment variables |
+| `settings.json`, `CLAUDE.md` (if present), `plugins/`, `skills/` | settings, permissions, hooks, user-level instructions and extensions, loaded by every session |
+
+**Leakage (reading).** Any session, and any code it runs, can read all of the above for every other project: code and data excerpts, file names and paths, your prompts, and any secret that ever appeared in a session (a pasted token, a `.env` file or credential Claude displayed, a password in command output). A session running at the same time as another can follow its transcript live. With unrestricted network access, all of it can leave the machine.
+
+**Cross-talk (writing).** Any session can change what other sessions load or run:
+* hooks in `settings.json` run commands at session events, in every project;
+* permission rules in `settings.json` can quietly allow tools or commands that would otherwise need your approval;
+* a user-level `CLAUDE.md`, skills and plugins add instructions and tools to every session;
+* MCP servers defined in `.claude.json` are started by later sessions;
+* memory files are loaded as context into other projects;
+* an edited transcript changes what a session "remembers" when it is resumed with `--resume`, and acts there with that project's files and deploy key.
+
+None of this shows up in any project's `git diff`, it survives restarts and image rebuilds, and the in-container instructions to treat this content as data are guidance only. Two sessions writing at the same time can also corrupt each other's files.
+
+**Mitigations**, none of which is isolation (see *Goal and threat model*):
+* Give projects with confidential data or untrusted input their own volume: `CLAUDY_CONFIG=claude-config-<project>`. Decide before the first session; history already in the shared volume can't easily be separated out.
+* Keep secrets out of sessions: don't paste them, and don't have Claude print `.env` files, tokens or credentials.
+* Check the shared settings now and then, e.g. `claudy bash -c 'cat /claude-config/settings.json; ls /claude-config/plugins /claude-config/skills; cat /claude-config/CLAUDE.md'`, and look for hooks, permission rules, plugins or MCP servers you didn't add.
+* Don't resume an old session after working on untrusted material in another project that shares the volume.
+* Start over with `podman volume rm claude-config` (logs you out and deletes all history) after a session you don't trust.
 
 ### The project folder is writable and trusted by you later
 Claude can change anything in `/workspace`: scripts, `Makefile`, notebooks, `.git/hooks`, `environment.yml`, IDE settings. If you later run or open those *outside* the container (a git hook, `make`, a Jupyter notebook on the host, VS Code tasks), the sandbox no longer applies. Review changes (`git diff`, including hooks) before running anything outside.
