@@ -160,6 +160,7 @@ claudy --ports=3000 --ports 8080     # the option can be repeated
 * Ports are fixed when the container starts. To add one, exit and restart with it; `claudy --ports 8080 claude --continue` resumes the last conversation. Claude knows this and asks you to restart when it needs a port, explaining why. Anything not saved in the project (temporary installs, background processes) is lost on restart.
 * Inside the container, `CLAUDY_PORTS` lists the published ports.
 * While published, the port is reachable by any program on your machine, including web pages in your browser and, on WSL2, the Windows side. Dev servers rarely have authentication, so publish ports only for the session that needs them. See `SECURITY.md`.
+* **Opening the page runs Claude's code in your browser, outside the sandbox.** It can make requests with your browser's logins and reach other `localhost` services (another project's Jupyter shares `localhost` cookies), show fake login pages, or offer downloads that run on Windows. Use a **separate browser profile** for `claudy` pages, logged into nothing and without a password manager or extensions, and don't open files they download. Where you can, let Claude test with `curl` or a headless browser inside the container instead.
 
 ## Jupyter Notebook
 
@@ -187,7 +188,7 @@ claudy --ports 8888                  # Claude Code with 8888 published, so Jupyt
 
 With the last form, start Jupyter inside the session (ask Claude, or run it in a `!` shell command) so that it listens on all interfaces: `jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root`. Ask Claude for the token URL, or run `jupyter server list`; it shows the container's hostname, so open it as `http://localhost:8888/?token=...`. Claude can then work on the same notebooks while you have them open. The server stops when you exit Claude.
 
-Notebooks are saved in the project folder. The Jupyter server runs with the same isolation as Claude (only the project folder, its own SSH key), and anyone with the token URL can run code in the container. Without `notebook` in the environment, `claudy jupyter` fails with `jupyter: not found`.
+Notebooks are saved in the project folder. The Jupyter server runs with the same isolation as Claude (only the project folder, its own SSH key), and anyone with the token URL can run code in the container. Notebook output that Claude produced (HTML, JavaScript widgets) runs in your browser when you open it, so the same advice as for `--ports` applies: use a separate browser profile, and don't browse an untrusted dev server from another project in the same profile while Jupyter is open. Without `notebook` in the environment, `claudy jupyter` fails with `jupyter: not found`.
 
 ## Git, GitLab and GitHub (SSH)
 

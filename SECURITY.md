@@ -132,6 +132,15 @@ The container uses Podman's default capability set and its default seccomp profi
 ### Published ports (Jupyter, `--ports`)
 No ports are published by default. `claudy jupyter` (8888) and `claudy --ports ...` bind the listed ports to `127.0.0.1` on the host, but on WSL2 `localhost` is forwarded to Windows, so any local Windows process or browser tab can reach them. Jupyter uses a token, and anyone with it can run code in the container. A dev server on a `--ports` port usually has no authentication at all, so anything local, including a malicious web page in your browser making requests to `localhost`, can talk to it. Publish ports only for the session that needs them.
 
+The other direction matters as much: **opening a page served from the container runs Claude-written (or dependency-supplied) code in your own browser, outside the sandbox**, with that browser's network position and logins. Such a page can:
+
+* send requests to other services on `localhost` and your local network: another project's dev server or Jupyter (cookies are shared by all ports of `localhost`, so a page on `localhost:8080` gets the same cookies as Jupyter on `localhost:8888`), Windows-side local services, your router's admin page;
+* trigger requests to websites you are logged into, which carry your cookies where those sites allow it (cross-site request forgery). It usually can't read the responses, but it can cause actions;
+* show convincing fake login pages, use your browser's saved data for that origin, write to the clipboard, and offer downloads that land in your Windows Downloads folder, where opening them runs them as your Windows user;
+* exploit a browser vulnerability, which escapes the claudy sandbox entirely.
+
+Use a **separate browser profile** (or a separate browser) for pages from `claudy`: not logged into anything, without a password manager or extensions, and not used for anything else. Don't open downloads from such pages, close the page when done, and don't run `claudy jupyter` for one project while browsing an untrusted dev server from another. Where possible, test from inside the container instead (`curl`, or a headless browser installed in the project's environment).
+
 ### Human factors
 The dedicated distro is only a launcher; running project code there (tests, dev servers, `make`) bypasses the container entirely. Guard rails make that harder to do by accident (README, *Guard rails against running code on the distro*): apt refuses SSH and development tools, the shell marks itself as the host, and `/tmp` and `/dev/shm` are `noexec`. They do not stop a user with `sudo`. The sandbox makes broad permission modes (such as auto-approving tool use) less risky, not safe. Don't put secrets you wouldn't give Claude into a project (`.env`, tokens, keys), and don't paste the `sudo` password into any session.
 
@@ -155,6 +164,7 @@ The dedicated distro is only a launcher; running project code there (tests, dev 
 | | Supply-chain compromise of the image or conda packages |
 | | Isolation between Claude sessions or code bases that must not see each other (shared config volume, same user and kernel) |
 | | Tampering in `.conda_env`, which persists between sessions and is not in `git diff` |
+| | Pages from the container opened in your browser (they run outside the sandbox, with your browser's logins and `localhost` access) |
 
 ## Reporting
 
