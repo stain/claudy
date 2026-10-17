@@ -53,8 +53,13 @@ SSH_VOLUME=${CLAUDY_SSH:-claude-ssh-$project_id}
 
 # The project is mounted at its own path, so Claude Code keeps each project's
 # conversations (--continue, --resume) and memory apart. The entrypoint links
-# /workspace to it, so paths written for /workspace keep working.
+# /workspace to it, so paths written for /workspace keep working. Images built
+# before that change lack the label and get the old /workspace mount.
 PROJECT_DIR=/projects/$project_id
+if [ "$(podman image inspect --format '{{index .Config.Labels "org.claudy.project-dir"}}' "$IMAGE" 2>/dev/null)" != 1 ]; then
+  echo "claudy: image '$IMAGE' predates per-project paths; mounting at /workspace. Rebuild it (see README)." >&2
+  PROJECT_DIR=/workspace
+fi
 
 opts=(-it --rm
   -v "$PWD":"$PROJECT_DIR"
