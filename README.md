@@ -246,9 +246,19 @@ Notes:
 * Host keys are recorded on first contact (`StrictHostKeyChecking accept-new`) and kept in the same volume. For a self-hosted GitLab this works the same way.
 * To revoke: delete the deploy key in GitLab, and `podman volume rm` the volume (`podman volume ls` lists them). Removing it makes the next start generate a new key.
 * Keys belong to the WSL distro they were generated in. Replacing or re-creating the distro gives every project a new key; add the new ones and delete the old deploy keys (see *Replacing an existing distro deletes its files*).
-* Commits are authored as `Claude Sandbox <claude-sandbox@localhost>` by default. Override per run:
-  `CLAUDY_GIT_NAME="Your Name" CLAUDY_GIT_EMAIL=you@example.org claudy`.
-  To change the default, edit the `GIT_*` variables in the `Dockerfile` and rebuild.
+* Commits made in the container have their own author; see *Commit author* below.
+
+### Commit author
+
+Commits made in the container are authored and committed as `Claude Sandbox <claude-sandbox@localhost>` by default. Override it for one run with `CLAUDY_GIT_NAME="Your Name" CLAUDY_GIT_EMAIL=you@example.org claudy`, or change the default by editing the `GIT_*` variables in the `Dockerfile` and rebuilding. Things to weigh:
+
+* **Whose name goes on Claude's work.** The default keeps sandbox commits recognisable in `git log` and on the forge, which helps review: you can see what came from the container and check it before merging. With your own name, Claude's commits look like your own work. That can be what you want (you take responsibility for them, and some projects expect a real author), but then rely on the `Co-Authored-By: Claude …` trailer that Claude Code adds, and review as carefully as if you hadn't written them yourself.
+* **Matching commits to your account.** GitHub and GitLab link commits to an account by email. `claude-sandbox@localhost` links to no one. To have commits count as yours without publishing your address, use the forge's no-reply address (shown in your account's email settings). If GitHub is set to block pushes that expose your private email, a commit with that address is rejected.
+* **Keep it out of this repository.** Your name and email are personal data and this repository is public: set `CLAUDY_GIT_NAME`/`CLAUDY_GIT_EMAIL` in a shell alias or your own startup file, not in the `Dockerfile` of a fork you publish.
+* **The environment wins over git config.** The variables override `user.name`/`user.email` in the project's `.git/config` and in any git config Claude writes, so the author can't be changed from inside the container unless Claude sets the variables in a command itself. It is still just text: anyone, Claude included, can put any name on a commit, so treat author fields as labels, not proof.
+* **Set it per project if identities differ.** Exported in your shell, the variables apply to every project you start from it. Use one alias per project (or set them on the command line) if, say, work and personal repositories need different authors.
+* **No commit signing in the container.** There is no GPG or signing key inside, and there shouldn't be: don't add the project's SSH key as a signing key on your account, or anything in the container could produce commits marked *Verified* as you. If a branch requires signed commits, keep that rule on the default branch and let the forge sign when you merge the pull request (a squash or merge commit made in the web interface), or re-sign the commits yourself on the host after review.
+* **Changing the author afterwards** rewrites the commits; do it on the host before they are pushed, or only on a branch nobody else has fetched.
 
 ## Dedicated WSL distro for nested containers (Windows only)
 
