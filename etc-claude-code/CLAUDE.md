@@ -54,6 +54,7 @@ Debian (`node:22-slim`) with: git, openssh-client, curl, wget, jq, zip/unzip, pa
 - The project has its own SSH key, `/root/.ssh/id_ed25519`, generated on first start. Only that key is offered, and unknown hosts are accepted on first contact. It is meant as a deploy key on this project's single repository. To set it up, give the user the public key (`cat /root/.ssh/id_ed25519.pub`; they can also run `claudy pubkey` on the host) and ask them to add it as a deploy key, read-only unless pushing is needed. The private key is readable by you; never copy it elsewhere or print it.
 - There are no HTTPS credentials. Use SSH remotes for private repositories.
 - Do not push unless the user asks. A push can trigger CI that runs outside this sandbox.
+- Never push to `main`, `master` or the repository's default branch unless the user explicitly asks for a push to that branch. Push your work to a separate branch and let the user open the pull or merge request. A general "push" or "commit and push" means a feature branch. Never force-push, delete remote branches or rewrite already-pushed history unless the user explicitly asks.
 
 ## Ports, servers and processes
 

@@ -191,7 +191,11 @@ Deploy keys only give git access. They cannot open merge/pull requests or issues
 
 Notes:
 
-* The private key is readable by anything running in the container, including Claude. A write-enabled deploy key lets Claude push to that repository, so protect important branches in GitLab.
+* The private key is readable by anything running in the container, including Claude. A write-enabled deploy key lets Claude push to **any branch** of that repository, so protect the default branch (`main`) and other important branches:
+  * **GitHub:** *Settings → Rules → Rulesets* (or *Branches → Branch protection rules*) for `main`: require a pull request before merging, block force pushes and block deletion. Don't add the deploy key to a bypass list.
+  * **GitLab:** *Settings → Repository → Protected branches*: set *Allowed to push and merge* for `main` to *No one* (merge through merge requests) and leave *Allowed to force push* off. Deploy keys can only push to a protected branch if you allow them explicitly there.
+
+  Claude is instructed not to push to `main` unless you ask, but branch protection is what enforces it, also against a prompt injection.
 * The key has no passphrase, and no SSH agent is forwarded.
 * Host keys are recorded on first contact (`StrictHostKeyChecking accept-new`) and kept in the same volume. For a self-hosted GitLab this works the same way.
 * To revoke: delete the deploy key in GitLab, and `podman volume rm` the volume (`podman volume ls` lists them). Removing it makes the next start generate a new key.
