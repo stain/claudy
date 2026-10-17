@@ -125,6 +125,23 @@ appendWindowsPath = false
 default = $user
 EOF
 
+# With interop disabled, WSL still registers the WSLInterop binfmt handler, and it also fires
+# for .exe files started inside containers. Remove it on every boot.
+cat > /etc/systemd/system/wsl-remove-interop.service <<'EOF'
+[Unit]
+Description=Remove the WSL interop binfmt handler (interop is disabled in /etc/wsl.conf)
+After=systemd-binfmt.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for f in /proc/sys/fs/binfmt_misc/WSLInterop /proc/sys/fs/binfmt_misc/WSLInterop-late; do if [ -e "$$f" ]; then echo -1 > "$$f"; fi; done'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+mkdir -p /etc/systemd/system/multi-user.target.wants
+ln -sfn /etc/systemd/system/wsl-remove-interop.service /etc/systemd/system/multi-user.target.wants/wsl-remove-interop.service
+
 apt-get update
 apt-get -y full-upgrade
 apt-get install -y --no-install-recommends \

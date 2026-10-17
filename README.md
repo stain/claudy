@@ -49,7 +49,7 @@ ln -s ~/claudy/claudy ~/bin/claudy
 
 On Ubuntu, `~/.profile` adds `~/bin` to `PATH` if the directory exists at login. If you have just created it, open a new WSL terminal (or run `export PATH="$HOME/bin:$PATH"`) and check with `command -v claudy`.
 
-`claudy` mounts the current directory at `/workspace` and the `claude-config` volume at `/claude-config`, and nothing else. It refuses to run from `/`, `$HOME` or the Windows drive.
+`claudy` mounts the current directory at `/workspace` and the `claude-config` volume at `/claude-config`, and nothing else. It also runs the container with a seccomp profile that blocks vsock (how WSL2 talks to Windows), derived on each start from Podman's default into `~/.cache/claudy/seccomp.json`; this needs `python3` on the host. It refuses to run from `/`, `$HOME` or the Windows drive.
 
 Make sure `ANTHROPIC_API_KEY` is not exported in your shell. If it were set, Claude Code would try API-key authentication instead of your Team subscription.
 
@@ -278,7 +278,25 @@ enabled = false
 appendWindowsPath = false
 ```
 
-Save (Ctrl+O, Enter, Ctrl+X), then restart the distro from PowerShell so the settings take effect:
+Save (Ctrl+O, Enter, Ctrl+X). Even with interop disabled, WSL registers the handler that passes `.exe` files to Windows, and it also fires inside containers. Remove it on every boot:
+
+```bash
+sudo tee /etc/systemd/system/wsl-remove-interop.service >/dev/null <<'EOF'
+[Unit]
+Description=Remove the WSL interop binfmt handler (interop is disabled in /etc/wsl.conf)
+After=systemd-binfmt.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for f in /proc/sys/fs/binfmt_misc/WSLInterop /proc/sys/fs/binfmt_misc/WSLInterop-late; do if [ -e "$$f" ]; then echo -1 > "$$f"; fi; done'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl enable wsl-remove-interop.service
+```
+
+Then restart the distro from PowerShell so the settings take effect:
 
 ```powershell
 wsl --terminate claude-sandbox
