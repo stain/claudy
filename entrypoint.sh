@@ -1,6 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
+# claudy mounts the project at /projects/<folder>-<hash> (CLAUDY_PROJECT_DIR) and
+# starts there. /workspace (empty or absent in the image) becomes a link to it, so
+# the conda env, PATH and project files can keep using /workspace.
+if [ -n "${CLAUDY_PROJECT_DIR:-}" ] && [ "$CLAUDY_PROJECT_DIR" != /workspace ] \
+   && [ -d "$CLAUDY_PROJECT_DIR" ] && [ ! -L /workspace ]; then
+    if [ -e /workspace ]; then rmdir /workspace; fi
+    ln -s "$CLAUDY_PROJECT_DIR" /workspace
+    # git checks the real path of the repository
+    git config --system --add safe.directory "$CLAUDY_PROJECT_DIR"
+fi
+
 ENV_DIR=/workspace/.conda_env
 YML=/workspace/environment.yml
 # Touched after every successful create/update. conda-meta/history is not

@@ -35,7 +35,9 @@ while [ $# -gt 0 ]; do
 done
 
 NESTED=${CLAUDY_NESTED:-0}
-IMAGE=${CLAUDY_IMAGE:-claudy}
+# Fully qualified local name, and run never pulls (below): a short name with no local
+# image could otherwise be looked up in a registry, depending on the host's config.
+IMAGE=${CLAUDY_IMAGE:-localhost/claudy:latest}
 CONFIG_VOLUME=${CLAUDY_CONFIG:-claude-config}
 
 case "$PWD" in
@@ -48,10 +50,36 @@ esac
 # The hash of the full path keeps same-named folders apart.
 project=$(basename "$PWD")
 hash=$(printf '%s' "$PWD" | sha256sum | cut -c1-8)
-SSH_VOLUME=${CLAUDY_SSH:-claude-ssh-${project//[^A-Za-z0-9_.-]/_}-$hash}
+project_id=${project//[^A-Za-z0-9_.-]/_}-$hash
+SSH_VOLUME=${CLAUDY_SSH:-claude-ssh-$project_id}
+
+# Warn (don't rebuild) when the image is older than the files it is built from, e.g.
+# after a git pull: this script takes effect at once, the image only after a rebuild.
+repo=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+if built=$(podman image inspect --format '{{.Created.Unix}}' "$IMAGE" 2>/dev/null); then
+  for f in Dockerfile entrypoint.sh etc-claude-code/CLAUDE.md; do
+    if [ -f "$repo/$f" ] && [ "$(stat -c %Y "$repo/$f")" -gt "$built" ]; then
+      echo "claudy: $f changed since image '$IMAGE' was built; rebuild it: podman build -t $IMAGE $repo" >&2
+      break
+    fi
+  done
+fi
+
+# The project is mounted at its own path, so Claude Code keeps each project's
+# conversations (--continue, --resume) and memory apart. The entrypoint links
+# /workspace to it, so paths written for /workspace keep working. Images built
+# before that change lack the label and get the old /workspace mount.
+PROJECT_DIR=/projects/$project_id
+if label=$(podman image inspect --format '{{index .Config.Labels "org.claudy.project-dir"}}' "$IMAGE" 2>/dev/null) \
+   && [ "$label" != 1 ]; then
+  echo "claudy: image '$IMAGE' predates per-project paths; mounting at /workspace until it is rebuilt." >&2
+  PROJECT_DIR=/workspace
+fi
 
 opts=(-it --rm
-  -v "$PWD":/workspace
+  -v "$PWD":"$PROJECT_DIR"
+  --workdir "$PROJECT_DIR"
+  -e CLAUDY_PROJECT_DIR="$PROJECT_DIR"
   -v "$CONFIG_VOLUME":/claude-config
   -v "$SSH_VOLUME":/root/.ssh
   -e CLAUDY_PROJECT="$project")
@@ -116,7 +144,7 @@ if [ "$NESTED" = 1 ]; then
   fi
   # Inner image storage persists per project, in its own volume
   opts+=(--device /dev/fuse --security-opt label=disable
-         -v "claude-containers-${project//[^A-Za-z0-9_.-]/_}-$hash":/var/lib/containers)
+         -v "claude-containers-$project_id":/var/lib/containers)
 fi
 
 if [ "${1:-}" = pubkey ]; then
@@ -138,4 +166,4 @@ if [ ${#ports[@]} -gt 0 ]; then
   opts+=(-e CLAUDY_PORTS="$(IFS=,; echo "${ports[*]}")")
 fi
 
-exec podman run "${opts[@]}" "$IMAGE" "$@"
+exec podman run --pull=never "${opts[@]}" "$IMAGE" "$@"

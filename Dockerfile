@@ -84,6 +84,9 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 ENV SHELL=/bin/bash \
     CLAUDE_CONFIG_DIR=/claude-config
 
+# claudy mounts the project at /projects/<folder>-<hash> only if this label says the
+# entrypoint links /workspace to it; older images get the project at /workspace.
+LABEL org.claudy.project-dir=1
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 # Absolute path: /workspace/.conda_env/bin is first on PATH, so a `claude` there would win
