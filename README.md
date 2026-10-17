@@ -52,7 +52,7 @@ cd ~/claudy
 podman build -t claudy .
 ```
 
-The repository is public, so the HTTPS clone needs no credentials (use it rather than `git@github.com:...`, which needs an SSH key). Update later with `git -C ~/claudy pull`, then rebuild the image.
+The repository is public, so the HTTPS clone needs no credentials (use it rather than `git@github.com:...`, which needs an SSH key). Update later with `git -C ~/claudy pull`, then rebuild the image. The pulled `claudy` takes effect at once, the image only after the rebuild; `claudy` warns at start when `Dockerfile`, `entrypoint.sh` or `etc-claude-code/CLAUDE.md` is newer than the image.
 
 The `Dockerfile` uses a fully qualified base image (`docker.io/library/node:22-slim`), so Podman needs no registry configuration. The build installs git, ssh, jq, zip/unzip, patch, build tools and an editor alongside Claude Code and Miniforge, and takes a few minutes the first time.
 

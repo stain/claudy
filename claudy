@@ -51,13 +51,25 @@ hash=$(printf '%s' "$PWD" | sha256sum | cut -c1-8)
 project_id=${project//[^A-Za-z0-9_.-]/_}-$hash
 SSH_VOLUME=${CLAUDY_SSH:-claude-ssh-$project_id}
 
+# Warn (don't rebuild) when the image is older than the files it is built from, e.g.
+# after a git pull: this script takes effect at once, the image only after a rebuild.
+repo=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+if built=$(podman image inspect --format '{{.Created.Unix}}' "$IMAGE" 2>/dev/null); then
+  for f in Dockerfile entrypoint.sh etc-claude-code/CLAUDE.md; do
+    if [ -f "$repo/$f" ] && [ "$(stat -c %Y "$repo/$f")" -gt "$built" ]; then
+      echo "claudy: $f changed since image '$IMAGE' was built; rebuild it: podman build -t $IMAGE $repo" >&2
+      break
+    fi
+  done
+fi
+
 # The project is mounted at its own path, so Claude Code keeps each project's
 # conversations (--continue, --resume) and memory apart. The entrypoint links
 # /workspace to it, so paths written for /workspace keep working. Images built
 # before that change lack the label and get the old /workspace mount.
 PROJECT_DIR=/projects/$project_id
 if [ "$(podman image inspect --format '{{index .Config.Labels "org.claudy.project-dir"}}' "$IMAGE" 2>/dev/null)" != 1 ]; then
-  echo "claudy: image '$IMAGE' predates per-project paths; mounting at /workspace. Rebuild it (see README)." >&2
+  echo "claudy: image '$IMAGE' predates per-project paths; mounting at /workspace until it is rebuilt." >&2
   PROJECT_DIR=/workspace
 fi
 
