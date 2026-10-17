@@ -336,7 +336,7 @@ The list below matches a typical Ubuntu 26.04 WSL install with developer tools a
      # interactive extras and services the sandbox host doesn't need
      byobu screen tmux htop run-one chrony rsyslog openssh-client rsync lsof lshw ethtool
    )
-   sudo apt purge --autoremove -s "${remove[@]}" | grep '^Remv' | less
+   sudo apt purge --autoremove -s "${remove[@]}" | grep -E '^(Remv|Purg) ' | less
    sudo apt purge --autoremove "${remove[@]}"
    sudo apt purge '~c'                         # leftover config of removed packages
    ```
