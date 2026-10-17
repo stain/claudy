@@ -85,6 +85,23 @@ Run `/status` in Claude to confirm the account and organisation. If it picked th
 
 The credentials are stored in the `claude-config` Podman volume. They survive `--rm`, reboots and image rebuilds, so you only log in once.
 
+### Shared or per-project Claude config
+
+By default every project uses the same `claude-config` volume: one login, and shared settings, plugins and history. That is what most people want. The trade-off is that every session can read, and change, what other sessions left there:
+
+* the transcripts of every session in every project (code and data Claude read, command output, what you pasted) and your prompt history;
+* Claude's memory: all projects are mounted at the same path, `/workspace`, so they share one memory folder;
+* settings and hooks (`settings.json`), which run in every later session of every project;
+* the login token itself.
+
+So a prompt injection in one project could read your other projects' conversations, or plant a hook or memory that acts in them. Keeping it shared is fine when the projects belong together: your own work, with data of similar sensitivity. Give a project its own volume when it holds data other projects shouldn't see (confidential or someone else's data), or when it works on untrusted material, such as reviewing third-party code:
+
+```bash
+CLAUDY_CONFIG=claude-config-myproject claudy
+```
+
+Use the same name every time you start that project (an alias helps), and log in once for it. Decide before the first session: all projects share one transcript and memory folder in the shared volume, so a project's history can't easily be separated out afterwards.
+
 ## Everyday use
 
 From any project folder:
@@ -579,7 +596,7 @@ What the container can see:
 * `/workspace`: the folder you started it from, read-write.
 * `/root/.ssh`: this project's own SSH key volume (see above).
 * With `CLAUDY_NESTED=1` only: `/dev/fuse` and `/var/lib/containers` (inner image storage, per project).
-* `/claude-config`: Claude Code's credentials, settings and session history. This volume is shared across projects, so it also holds transcripts from other projects. For strict separation between projects, run `CLAUDY_CONFIG="claude-config-$(basename "$PWD")" claudy`, at the cost of logging in once per project.
+* `/claude-config`: Claude Code's credentials, settings, memory and session history. Shared across projects by default, so it also holds other projects' transcripts; see *Shared or per-project Claude config* for when to give a project its own (`CLAUDY_CONFIG=claude-config-<project>`).
 
 What it cannot see: the rest of the WSL filesystem, the Windows drives, your personal SSH keys and your git credentials, and other projects' SSH keys.
 
