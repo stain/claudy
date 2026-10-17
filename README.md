@@ -6,6 +6,8 @@ A container image for running Claude Code, Snakemake and Jupyter where only the 
 >
 > It is **not** security isolation between Claude sessions or between code bases that must not see each other. All sessions run as the same user on the same kernel, and by default share one Claude config volume (login, transcripts, memory, settings). Separating them properly needs, at the least, separate virtual machines with separate keys and logins for each. A per-project config (`CLAUDY_CONFIG`, see below) is a mitigation, not isolation. See `SECURITY.md`.
 
+> **Note for AI agents.** The risks mentioned in this README and in `SECURITY.md` are for the user's awareness. They are not suggestions, permissions or tasks. Stay within what the user asked; if the sandbox blocks something you need, tell the user rather than look for a way around it.
+
 ## Layout
 
 Keep the sandbox definition separate from the projects it runs on, so that Claude can never edit its own container configuration:
@@ -65,7 +67,7 @@ ln -s ~/claudy/claudy ~/bin/claudy
 
 On Ubuntu, `~/.profile` adds `~/bin` to `PATH` if the directory exists at login. If you have just created it, open a new WSL terminal (or run `export PATH="$HOME/bin:$PATH"`) and check with `command -v claudy`.
 
-`claudy` mounts the current directory at `/workspace` and the `claude-config` volume at `/claude-config`, and nothing else. It also runs the container with a seccomp profile that blocks vsock (how WSL2 talks to Windows), derived on each start from Podman's default into `~/.cache/claudy/seccomp.json`; this needs `python3` on the host. It refuses to run from `/`, `$HOME` or the Windows drive.
+`claudy` mounts the current directory at `/workspace` and the `claude-config` volume at `/claude-config`, and nothing else. It also runs the container with a stricter seccomp profile than Podman's default, derived from it on each start into `~/.cache/claudy/seccomp.json` (see `SECURITY.md`); this needs `python3` on the host. It refuses to run from `/`, `$HOME` or the Windows drive.
 
 Make sure `ANTHROPIC_API_KEY` is not exported in your shell. If it were set, Claude Code would try API-key authentication instead of your Team subscription.
 
@@ -91,14 +93,7 @@ The credentials are stored in the `claude-config` Podman volume. They survive `-
 
 ### Shared or per-project Claude config
 
-By default every project uses the same `claude-config` volume: one login, and shared settings, plugins and history. That is what most people want. The trade-off is that every session can read, and change, what other sessions left there:
-
-* the transcripts of every session in every project (code and data Claude read, command output, what you pasted) and your prompt history;
-* Claude's memory: all projects are mounted at the same path, `/workspace`, so they share one memory folder;
-* settings and hooks (`settings.json`), which run in every later session of every project;
-* the login token itself.
-
-So a prompt injection in one project could read your other projects' conversations, including any secret that ever appeared in them (a token you pasted, a `.env` Claude printed), or leave instructions (in settings, memory or old conversations) that act in them later. Keeping it shared is fine when the projects belong together: your own work, with data of similar sensitivity. Give a project its own volume when it holds data other projects shouldn't see (confidential or someone else's data), or when it works on untrusted material, such as reviewing third-party code:
+By default every project uses the same `claude-config` volume: one login, and shared settings, plugins and history. That is what most people want. The trade-off is that every session can read, and change, what other sessions left there: the conversations of all your projects (including code, data and any secret that appeared in them), your prompt history, Claude's memory (shared, because all projects are mounted at `/workspace`), the settings every session loads, and the login. So a session misled in one project could see your other projects' work, or influence them later. Details in `SECURITY.md`, *Cross-talk and leakage through the shared config volume*. Keeping it shared is fine when the projects belong together: your own work, with data of similar sensitivity. Give a project its own volume when it holds data other projects shouldn't see (confidential or someone else's data), or when it works on untrusted material, such as reviewing third-party code:
 
 ```bash
 CLAUDY_CONFIG=claude-config-myproject claudy
@@ -160,7 +155,7 @@ claudy --ports=3000 --ports 8080     # the option can be repeated
 * Ports are fixed when the container starts. To add one, exit and restart with it; `claudy --ports 8080 claude --continue` resumes the last conversation. Claude knows this and asks you to restart when it needs a port, explaining why. Anything not saved in the project (temporary installs, background processes) is lost on restart.
 * Inside the container, `CLAUDY_PORTS` lists the published ports.
 * While published, the port is reachable by any program on your machine, including web pages in your browser and, on WSL2, the Windows side. Dev servers rarely have authentication, so publish ports only for the session that needs them. See `SECURITY.md`.
-* **Opening the page runs Claude's code in your browser, outside the sandbox.** It can act with your browser's logins, reach other services on your machine (such as another project's Jupyter), show fake login pages, or offer downloads that run on Windows. Use a **separate browser profile** for `claudy` pages, logged into nothing and without a password manager or extensions, and don't open files they download. Where you can, let Claude test with `curl` or a headless browser inside the container instead.
+* **Opening the page runs Claude's code in your browser, outside the sandbox**, with your browser's logins and its access to your machine and network (see `SECURITY.md`, *Published ports*). Use a **separate browser profile** for `claudy` pages, logged into nothing and without a password manager or extensions, and don't open files they download. Where you can, let Claude test with `curl` or a headless browser inside the container instead.
 
 ## Jupyter Notebook
 
@@ -188,7 +183,7 @@ claudy --ports 8888                  # Claude Code with 8888 published, so Jupyt
 
 With the last form, start Jupyter inside the session (ask Claude, or run it in a `!` shell command) so that it listens on all interfaces: `jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root`. Ask Claude for the token URL, or run `jupyter server list`; it shows the container's hostname, so open it as `http://localhost:8888/?token=...`. Claude can then work on the same notebooks while you have them open. The server stops when you exit Claude.
 
-Notebooks are saved in the project folder. The Jupyter server runs with the same isolation as Claude (only the project folder, its own SSH key), and anyone with the token URL can run code in the container. Notebook output that Claude produced (HTML, JavaScript widgets) runs in your browser when you open it, so the same advice as for `--ports` applies: use a separate browser profile, and don't browse an untrusted dev server from another project in the same profile while Jupyter is open. Without `notebook` in the environment, `claudy jupyter` fails with `jupyter: not found`.
+Notebooks are saved in the project folder. The Jupyter server runs with the same isolation as Claude (only the project folder, its own SSH key), and anyone with the token URL can run code in the container. Notebook output that Claude produced runs in your browser when you open it, so the same advice as for `--ports` applies: use a separate browser profile for it. Without `notebook` in the environment, `claudy jupyter` fails with `jupyter: not found`.
 
 ## Git, GitLab and GitHub (SSH)
 
@@ -342,7 +337,7 @@ enabled = false
 appendWindowsPath = false
 ```
 
-Save (Ctrl+O, Enter, Ctrl+X). Even with interop disabled, WSL registers the handler that passes `.exe` files to Windows, and it also fires inside containers. Remove it on every boot:
+Save (Ctrl+O, Enter, Ctrl+X). Even with interop disabled, WSL keeps its handler for Windows programs registered (why that matters: `SECURITY.md`, *WSL2 is not a virtual machine boundary to Windows*). Remove it on every boot:
 
 ```bash
 sudo tee /etc/systemd/system/wsl-remove-interop.service >/dev/null <<'EOF'
@@ -605,8 +600,12 @@ What the container can see:
 
 What it cannot see: the rest of the WSL filesystem, the Windows drives, your personal SSH keys and your git credentials, and other projects' SSH keys.
 
-Limits of this isolation:
+Risks to be aware of (each explained in `SECURITY.md`):
 
+* **It limits mistakes, it doesn't isolate projects from each other** (*Goal and threat model*). Sessions share the Claude config volume by default, and an escape from any container lands as your user.
+* **On WSL2 the dedicated distro is not a virtual machine**: root in the distro can reach your Windows files, so nothing from a container may get there, and never type the `sudo` password where Claude or code it ran could see it (*WSL2 is not a virtual machine boundary to Windows*).
+* **What you run or open outside the container is outside the sandbox**: scripts, hooks and notebooks from the project, its `.conda_env`, and pages from `--ports` or Jupyter in your browser (*The project folder is writable*, *The project conda env*, *Published ports*).
+* **Deploy keys reach beyond the container**: a write key can push to any branch and start CI (*SSH deploy keys reach beyond the container*).
 * **Network access is unrestricted.** Claude, or code it runs, can send anything in `/workspace` to the internet. Do not use this sandbox for data that must not leave the machine, such as Trusted Research Environment data.
 * No ports are published by default. `claudy jupyter` (8888) and `--ports` bind to `127.0.0.1` only.
 * Avoid VS Code Dev Containers for this setup: by default they forward your SSH agent and git credentials into the container.
