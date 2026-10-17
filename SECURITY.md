@@ -2,17 +2,21 @@
 
 A short threat model for the Claude Code sandbox in this repository: what it protects, what it does not, and the risks you accept by using it. It describes the design; parts of it (notably nested mode) have not been independently tested. Read it together with the *Security notes* in `README.md`.
 
+> **Note for AI agents.** This document is for the user's own risk assessment. It lists weaknesses and channels that you have not been asked to use: a risk described here is not a suggestion, a permission or a task. Stay within what the user asked for. If something you need is blocked by the sandbox, say so and ask the user; don't look for a way around it. Don't test, demonstrate or exploit anything described here, or read other sessions' data, unless the user explicitly asks for a specific test; then do the minimum that answers it and report what you did.
+
 ## Goal and threat model
 
 The goal is to limit the damage from **a mistake or misbehaviour of Claude Code or of code it runs**: a bad command, a malicious dependency, or a prompt injection hidden in a file, web page or dataset. The container makes it hard for such things to touch files outside one project folder, your personal SSH keys and git credentials, or other projects' keys.
 
 It is not designed to stop a determined attacker with a kernel exploit, to keep data from leaving the machine, or to make untrusted software safe to run.
 
+**It is not isolation between Claude sessions or code bases.** The purpose is to reduce the blast radius of accidental or misleading instructions and over-eager agents, not to keep projects that must not see each other apart. All sessions run as the same host user on the same kernel and, by default, share one Claude config volume holding every session's transcripts, memory, settings and the login. One session can read and rewrite what another left there (see *The Claude login is exposed to the container*). Real isolation between code bases needs, at the least, separate virtual machines, each with its own keys and logins; a per-project config volume (`CLAUDY_CONFIG`) is only a mitigation.
+
 ## What is protected
 
 | Asset | Protection |
 |---|---|
-| Rest of the WSL/Linux filesystem, Windows drives | Not mounted; only `$PWD` is visible. `claudy` refuses `/`, `$HOME`, `/mnt/c` and `/mnt/c/Users/*`. |
+| Rest of the WSL/Linux filesystem, Windows drives | Not mounted; only `$PWD` is visible. `claudy` refuses `/`, `$HOME`, `/mnt/c` and `/mnt/c/Users/*`. Root in the WSL distro can still mount the Windows drives (see *WSL2 is not a virtual machine boundary*). |
 | Your SSH keys, git credentials, agent | Never mounted or forwarded. |
 | Other projects' SSH keys | One SSH key volume per project folder. |
 | Host privileges | Rootless Podman: root in the container is your unprivileged user on the host. |
@@ -26,10 +30,41 @@ Network access is unrestricted. Anything the container can read (the project, th
 ### The Claude login is exposed to the container
 The subscription login lives in the `claude-config` volume, readable by everything in the container. The volume is shared by all projects, so it also holds other projects' transcripts. Because every project is mounted at the same path (`/workspace`), they also share a single Claude memory folder, so memories from one project are loaded into sessions in another. A compromised session could take the token and use your quota.
 
-The volume is also **writable and persistent**, so it is a channel between sessions and projects: settings and hooks (`settings.json`, which can run commands in every later session), and memory files are read by later sessions in other projects. A prompt injection in one project can plant instructions or hooks that act in another. Use `CLAUDY_CONFIG=claude-config-<project>` for separation (one login per project), and log out with `podman volume rm claude-config`.
+The volume is also **writable and persistent**, so it is a channel between sessions and projects (details in *Cross-talk and leakage through the shared config volume* below): settings and hooks (`settings.json`, which can run commands in every later session), and memory files are read by later sessions in other projects. A prompt injection in one project can plant instructions or hooks that act in another. Edited transcripts carry such instructions into sessions that are resumed later.
+
+The volume keeps whatever appeared in a session: a token you pasted, a `.env` file or credential Claude displayed, command output with a password. Every session sharing the volume can read those. Keep secrets out of sessions.
+
+`CLAUDY_CONFIG=claude-config-<project>` gives a project its own volume (one login per project). That is a mitigation: the volumes still belong to your host user, so an escape from any container, or anything else running as you, reads them all. Log out with `podman volume rm claude-config`.
+
+### Cross-talk and leakage through the shared config volume
+Every session that uses the same config volume (the default) reads and writes the same files, while it runs and long after. Claude Code decides what it keeps there, and the layout changes between versions. Broadly, the volume holds: the login token; full transcripts of every session (messages, files Claude read or wrote, commands and their output), and all projects share one transcript and memory folder because they are all mounted at `/workspace`; Claude's memory; your prompt history; earlier versions of edited files; pasted text; session state that can include environment variables; tool server definitions that may contain tokens; and the settings, hooks, instructions and extensions every session loads.
+
+**Leakage (reading).** Any session, and any code it runs, can read all of this for every other project, including sessions running at the same time: code and data excerpts, your prompts, and any secret that ever appeared in a session (a pasted token, a credential Claude displayed, a password in command output). With unrestricted network access, all of it can leave the machine.
+
+**Cross-talk (writing).** Any session can change what other sessions load or run: shared settings (including hooks and permissions), user-level instructions, extensions, memory, and the transcripts that resumed sessions continue from. A change made in one project then acts in another, with that project's files and deploy key.
+
+None of this shows up in any project's `git diff`, it survives restarts and image rebuilds, and the in-container instructions to treat this content as data are guidance only. Two sessions writing at the same time can also corrupt each other's files.
+
+**Mitigations**, none of which is isolation (see *Goal and threat model*):
+* Give projects with confidential data or untrusted input their own volume: `CLAUDY_CONFIG=claude-config-<project>`. Decide before the first session; history already in the shared volume can't easily be separated out.
+* Keep secrets out of sessions: don't paste them, and don't have Claude print `.env` files, tokens or credentials.
+* Check the shared settings now and then, e.g. `claudy bash -c 'cat /claude-config/settings.json; ls /claude-config/plugins /claude-config/skills; cat /claude-config/CLAUDE.md'`, and look for hooks, permission rules, plugins or MCP servers you didn't add.
+* Don't resume an old session after working on untrusted material in another project that shares the volume.
+* Start over with `podman volume rm claude-config` (logs you out and deletes all history) after a session you don't trust.
 
 ### The project folder is writable and trusted by you later
 Claude can change anything in `/workspace`: scripts, `Makefile`, notebooks, `.git/hooks`, `environment.yml`, IDE settings. If you later run or open those *outside* the container (a git hook, `make`, a Jupyter notebook on the host, VS Code tasks), the sandbox no longer applies. Review changes (`git diff`, including hooks) before running anything outside.
+
+### The project conda env is persistent and not reviewed
+The project's conda environment lives in the project folder (`.conda_env/`), so it survives between runs, and it is only updated when `environment.yml` changes, never rebuilt from scratch. Claude and any code it runs can change it, and it ignores itself in git (its own `.gitignore` with `*`), so `git diff` never shows those changes. A compromised session can therefore leave something behind in it that runs in every later session of that project, although each session starts a new container: the environment's own scripts and programs are run on every start and come first on `PATH`.
+
+Outside the container it is worse: if you activate the environment on the host, run anything from `.conda_env/bin`, or let an IDE use it as a Python interpreter (VS Code's Python extension discovers environments in the workspace and runs their `python`), that code runs as you, outside the sandbox.
+
+* Treat `.conda_env` as untrusted. Never activate or run it outside `claudy`; in a host IDE, choose another interpreter.
+* Delete it (`rm -rf .conda_env`) after a session you don't trust, before trusting a project again, and when copying a project elsewhere. The next start rebuilds it from `environment.yml`.
+* Review `environment.yml` in `git diff` like code: its channels, and its `pip:` entries (any package index, `git+https` URLs, local paths whose build scripts run at install time).
+
+What the image does about it: it starts Claude by absolute path, so the environment can't replace Claude itself, and its conda configuration allows only the `conda-forge` and `bioconda` channels, locked against overrides from the environment or the user. These are partial measures: they don't cover everything an environment can run, the channel lock is not enforced for environments built from `environment.yml`, and `pip:` entries are not restricted at all. So reviewing `environment.yml` and deleting `.conda_env` when in doubt remain the actual protection.
 
 ### SSH deploy keys reach beyond the container
 The per-project private key is readable by Claude. With write access it can push to that repository, and a push can start GitLab CI, which runs with the project's CI secrets and runners, outside this sandbox. Use read-only deploy keys where possible, protect branches, and restrict who can change CI configuration. Never register this key on your user account.
@@ -45,6 +80,21 @@ If this repository, or a folder containing it, is mounted as `/workspace`, Claud
 ### Shared kernel; container escapes
 A container is not a virtual machine. A kernel or runtime vulnerability could let code in the container reach the host as your user. On **WSL2** all distros share one Linux kernel and VM, and by default your user can read and write the Windows drives (`/mnt/c`, as your Windows account) and start Windows programs through interop. For the strongest isolation use a dedicated WSL distro with `[automount] enabled = false` and `[interop] enabled = false`. This is *required* for nested mode and recommended otherwise. Trim that distro to what `claudy` needs (README, *Trim the distro*): every other package there, especially services and agents such as `wsl-pro-service`, `landscape-client` or `snapd`, runs as your user or as root next to the sandbox and is reachable after an escape.
 
+### WSL2 is not a virtual machine boundary to Windows
+A WSL2 distro is not isolated from Windows the way a separate virtual machine is. WSL is built to share files and programs with the Windows account that starts it, and the dedicated distro's `wsl.conf` settings only switch off the *automatic* parts at startup. They are not a boundary against root *inside* the distro. Tested on Ubuntu 26.04 with automount and interop disabled:
+* Root in the distro **can mount the Windows drives again** (confirmed), readable and writable with the rights of the Windows account that started WSL.
+* WSL's handler for Windows programs stays registered even with interop disabled. The dedicated distro's setup therefore removes it on every boot (a `wsl-remove-interop.service` systemd unit, see README).
+
+From inside a `claudy` container (tested in the default mode) the drives can't be mounted: container root is your unprivileged Linux user in a user namespace, and the kernel refuses such mounts there, in nested containers too. Only root in the distro can, which is why nothing from a container may get there (see below).
+
+Windows programs are a different case: the kernel's handlers for foreign program formats are shared by the whole system, and WSL's handler for Windows programs **also applies inside the container** (tested). In the test it did not reach Windows, but only by chance. With interop enabled in the distro, assume that code in a `claudy` container can start Windows programs as your Windows user. Two measures stand in the way: the dedicated distro removes the handler at boot, and `claudy` blocks the channel WSL uses to reach Windows (below). Neither has been verified end to end.
+
+WSL talks to Windows over vsock (`AF_VSOCK`), which network namespaces don't isolate: with Podman's default seccomp profile, processes in a container can open vsock sockets (tested), so whatever the Windows side of WSL listens on would be reachable from inside without root. `claudy` therefore runs containers with a seccomp profile derived from Podman's default on every start (written to `~/.cache/claudy/seccomp.json`) that refuses vsock sockets, including through related system calls. Nested containers inherit the filter. Side effect: some rarely used socket calls fail, notably from 32-bit programs. `claudy` refuses to start if it can't build the profile from the host's `/usr/share/containers/seccomp.json`.
+
+WSL also gives every distro WSLg (`/mnt/wslg`, GUI apps shown on Windows) and the Windows GPU drivers (`/usr/lib/wsl`, shared read-only over 9p). Containers don't see them, but they are further channels from the distro to Windows; they can only be switched off for all distros at once, in `%UserProfile%\.wslconfig` on Windows (for WSLg: `guiApplications=false` under `[wsl2]`).
+
+So the dedicated distro protects your Windows files only as long as nothing from the container gets root in the distro. Rootless Podman means an escape lands as your Linux user, not root. Never give Claude the `sudo` password and don't enable passwordless `sudo`. The `sudo` password is weaker protection than it looks: anything running as your user can intercept what you type in that user's shells, the `sudo` password included. So never type it in a shell that a container escape could have touched. A planned two-user layout separates the roles: a `claudy` user without `sudo` that runs the sandbox, and an `admin` user entered only with `wsl -d <name> -u admin` from PowerShell, with the launcher and image ID owned by root (*Future work* in `CLAUDE.md`). A kernel exploit that gives root in the WSL2 VM reaches your Windows files regardless. For a stronger boundary, run the distro under a separate, unprivileged Windows account (drives mounted from it then carry only that account's rights), or use a full virtual machine instead of WSL2.
+
 ### Nested containers
 The image includes Podman, which works in the default mode too, with the `vfs` storage driver. It needs no extra device or capability: the default container already lets any process create user namespaces and mount filesystems inside them (Podman's default seccomp profile allows it), so installing Podman does not open a new kernel interface. It does make heavy use of it routine. User namespaces are a frequent source of Linux kernel privilege-escalation bugs, so the shared-kernel risk above applies to the default mode as well, and the dedicated WSL distro is recommended for any use of Podman inside, not only nested mode. Blocking user namespaces (a custom seccomp profile, or `user.max_user_namespaces=0` in the distro) would remove that surface but also break nested Podman.
 
@@ -54,21 +104,33 @@ Inner containers share the outer container's network (`--network=host` inside me
 Nested mode adds `/dev/fuse` (the entrypoint then switches Podman to `overlay` on `fuse-overlayfs`), SELinux labelling disabled, and a persistent per-project volume for inner images. FUSE and disabled labelling enlarge the kernel attack surface further. `claudy` refuses it on a WSL distro that still has Windows drives or interop, but this check is a guard against mistakes, not a security boundary (`CLAUDY_ALLOW_UNSAFE_NESTED=1` overrides it). Nested mode has not been verified end to end. Never mount a host Podman socket instead: it allows mounting any host path.
 
 ### Image and supply chain
-The image is built from a floating `node:22-slim` tag, the latest Miniforge installer (downloaded and run without checksum verification), and unpinned `npm install -g @anthropic-ai/claude-code`. Conda packages come from `conda-forge` and `bioconda` without hash pinning, and nested containers pull images from Docker Hub without verification. Packages Claude installs at runtime (`apt`, `pip`, `npm`) are further unpinned inputs. A compromise of any of these ends up inside the container, and inside your project through code that environment runs. Pin versions and checksums for stricter use (see *Future work* in `CLAUDE.md`).
+The image is built from a floating `node:22-slim` tag, the latest Miniforge installer (downloaded and run without checksum verification), and unpinned `npm install -g @anthropic-ai/claude-code`. Conda packages come from `conda-forge` and `bioconda` without hash pinning (the channel allowlist does not cover `environment.yml` or `pip:`, see *The project conda env* above), and nested containers pull images from Docker Hub without verification. Packages Claude installs at runtime (`apt`, `pip`, `npm`) are further unpinned inputs. A compromise of any of these ends up inside the container, and inside your project through code that environment runs. Pin versions and checksums for stricter use (see *Future work* in `CLAUDE.md`).
 
 ### Weaker defaults
-The container uses Podman's default capability set and default seccomp profile; there is no `--cap-drop=ALL`, `no-new-privileges`, read-only root filesystem or resource limits (CPU, memory, processes). A runaway process, or a nested build on `vfs` storage, can exhaust the host's CPU, memory or disk. The container runs as in-container root.
+The container uses Podman's default capability set and its default seccomp profile, with vsock blocked (see above); there is no `--cap-drop=ALL`, `no-new-privileges`, read-only root filesystem or resource limits (CPU, memory, processes). A runaway process, or a nested build on `vfs` storage, can exhaust the host's CPU, memory or disk. The container runs as in-container root, which rootless Podman maps to your user. A non-root user inside would add little on its own: it would map to the same host user, and any process can still create a user namespace with full capabilities inside it (nested Podman relies on that). Possible next steps are `no-new-privileges`, dropping unused capabilities and a separate host subuid range per project (*Future work* in `CLAUDE.md`).
 
 ### Published ports (Jupyter, `--ports`)
 No ports are published by default. `claudy jupyter` (8888) and `claudy --ports ...` bind the listed ports to `127.0.0.1` on the host, but on WSL2 `localhost` is forwarded to Windows, so any local Windows process or browser tab can reach them. Jupyter uses a token, and anyone with it can run code in the container. A dev server on a `--ports` port usually has no authentication at all, so anything local, including a malicious web page in your browser making requests to `localhost`, can talk to it. Publish ports only for the session that needs them.
 
+The other direction matters as much: **opening a page served from the container runs Claude-written (or dependency-supplied) code in your own browser, outside the sandbox**, with that browser's network position and logins. Such a page can:
+
+* reach other services on your machine and local network, including other projects' dev servers or Jupyter, with which pages on `localhost` share browser state;
+* cause actions on websites you are logged into;
+* show fake login pages, and offer downloads that run as your Windows user if you open them;
+* exploit a browser vulnerability, which escapes the claudy sandbox entirely.
+
+Use a **separate browser profile** (or a separate browser) for pages from `claudy`: not logged into anything, without a password manager or extensions, and not used for anything else. Don't open downloads from such pages, close the page when done, and don't run `claudy jupyter` for one project while browsing an untrusted dev server from another. Where possible, test from inside the container instead (`curl`, or a headless browser installed in the project's environment).
+
 ### Human factors
-The sandbox makes broad permission modes (such as auto-approving tool use) less risky, not safe. Don't put secrets you wouldn't give Claude into a project (`.env`, tokens, keys), and don't paste the `sudo` password into any session.
+The dedicated distro is only a launcher; running project code there (tests, dev servers, `make`) bypasses the container entirely. Guard rails make that harder to do by accident (README, *Guard rails against running code on the distro*): apt refuses SSH and development tools, the shell marks itself as the host, and `/tmp` and `/dev/shm` are `noexec`. They do not stop a user with `sudo`. The sandbox makes broad permission modes (such as auto-approving tool use) less risky, not safe. Don't put secrets you wouldn't give Claude into a project (`.env`, tokens, keys), and don't paste the `sudo` password into any session.
 
 ## This document is public
 
-`SECURITY.md` is published on GitHub, so assume an attacker has read it, and that Claude can read it too whenever this repository is mounted (as when working on the sandbox itself). That is acceptable because none of the protections depend on secrecy: the weaknesses listed here are generic to containers, and a model or attacker can find them without this file. Still:
+`SECURITY.md` is published on GitHub, so assume an attacker has read it, and that Claude can read it too whenever this repository is mounted (as when working on the sandbox itself). That is acceptable because none of the protections depend on secrecy: the weaknesses listed here are generic to containers, and a model or attacker can find them without this file. It describes risks at the level needed to judge and mitigate them, not how to carry them out. Still:
 
+
+* **Documentation can inspire.** An agent that reads this file learns about channels and weaknesses it would not otherwise have considered, and an over-eager agent might try one as a "workaround" when something is blocked, without the user ever having suggested it. To keep that exposure small: the file is not part of the image, the in-container instructions don't point agents to it and tell them to report blocked actions instead of working around them, it opens with a note for agents, and it avoids recipes. Don't paste it into sessions on other projects or add it to a project's context, and when Claude works on this repository, read its changes to this file with that in mind.
+* **Keep it free of recipes**: describe what can happen and what to do about it, not exact commands, conditions or file locations that would help someone carry an attack out.
 * **Keep it free of secrets and site-specific detail**: no hostnames, usernames, project or dataset names, tokens, key fingerprints or internal GitLab URLs, in this file or anywhere else in the repository. Put local notes outside the repository.
 * **Integrity matters more than confidentiality.** If Claude can edit this repository, it could weaken `SECURITY.md`, `README.md` or `CLAUDE.md` to hide a change, or plant instructions there. Review `git diff` of all documentation and scripts, not just the code, before you trust or rebuild from them, and read the published version on GitHub for the baseline.
 * **Don't treat the document as a control.** It cannot stop a compromised session; the container boundary and your review do.
@@ -81,8 +143,11 @@ The sandbox makes broad permission modes (such as auto-approving tool use) less 
 | Access to your personal SSH keys and git credentials | Theft of the Claude login and project deploy key |
 | Cross-project key reuse | Tampering that you later execute outside the container |
 | Lasting changes to the image from inside the container | Cross-project influence through the shared `claude-config` volume (hooks, memory) |
-| Unintended access to the Windows drives (with the dedicated distro) | Kernel or runtime escapes, a shared WSL2 kernel |
+| Unintended access to the Windows drives (with the dedicated distro) | Kernel or runtime escapes, a shared WSL2 kernel; root in the distro can mount the Windows drives |
 | | Supply-chain compromise of the image or conda packages |
+| | Isolation between Claude sessions or code bases that must not see each other (shared config volume, same user and kernel) |
+| | Tampering in `.conda_env`, which persists between sessions and is not in `git diff` |
+| | Pages from the container opened in your browser (they run outside the sandbox, with your browser's logins and `localhost` access) |
 
 ## Reporting
 
