@@ -241,7 +241,7 @@ powershell -ExecutionPolicy Bypass -File .\new-claudy-distro.ps1 -User yourname
 
 **Warning:** the script runs as you on Windows and as root inside the new distro, and `-ExecutionPolicy Bypass` skips the only check Windows would do, so reading it is the check. Only take it from this repository on GitHub, over HTTPS as above, not from a fork, a mirror, a link someone sent you, or a copy in a WSL folder or project (`\\wsl.localhost\...`) that Claude or a container could have edited. To run exactly the version you reviewed, replace `main` in the URL with a commit hash from the GitHub history.
 
-Options: `-Name` (default `claude-sandbox`), `-Distro` (default `Ubuntu-26.04`), `-Location` (folder for the virtual disk), `-SkipTrim`, `-SkipBuild`. It refuses to touch an existing distro of the same name. Afterwards, back up the result (`wsl --export claude-sandbox claude-sandbox.tar`) and continue with *Keep Claude away from the distro itself* below. The manual steps follow.
+Options: `-Branch` (default `main`; the branch of this repository to check out and build, e.g. to test a pull request), `-Name` (default `claude-sandbox`), `-Distro` (default `Ubuntu-26.04`), `-Location` (folder for the virtual disk), `-SkipTrim`, `-SkipBuild`. It refuses to touch an existing distro of the same name. Afterwards, back up the result (`wsl --export claude-sandbox claude-sandbox.tar`) and continue with *Keep Claude away from the distro itself* below. The manual steps follow.
 
 ### Replacing an existing distro deletes its files
 
@@ -438,7 +438,7 @@ The distro is only a launcher. Project code, tests and dev servers belong in `cl
 
 * **apt refuses development tools and SSH.** `/etc/apt/preferences.d/claudy-no-dev-tools.pref` pins `openssh-client`, compilers, `make`, Node.js, `pip`/`venv`, Java, Go, Rust, Ruby, Docker and friends to priority -1, so `sudo apt install nodejs` reports *no installation candidate*. Python itself stays: `wsl-setup`, netplan and `claudy` (to build its seccomp profile) need it.
 * **The shell reminds you where you are.** Interactive shells show a red `[claudy host]` prompt marker, print a warning when you `cd` into a project under `~/projects`, and answer a missing command with a hint to run it through `claudy` instead.
-* **`/tmp` and `/dev/shm` are mounted `noexec`** at every boot (`claudy-tmp-noexec.service`), so a binary downloaded or unpacked there can't be started. apt is told to use `/var/tmp` for package configuration scripts, which would otherwise fail. `~/projects` is deliberately *not* `noexec`: the container's `/workspace` is a bind mount of it and would inherit the flag, breaking every script and conda program inside `claudy`.
+* **`/tmp`, `/dev/shm` and `/run/shm` are mounted `noexec`** at every boot (`claudy-tmp-noexec.service`; WSL mounts `/run/shm` as a separate tmpfs), so a binary downloaded or unpacked there can't be started. apt is told to use `/var/tmp` for package configuration scripts, which would otherwise fail. `~/projects` is deliberately *not* `noexec`: the container's `/workspace` is a bind mount of it and would inherit the flag, breaking every script and conda program inside `claudy`.
 
 To set them up by hand, as root (`sudo -i`):
 
@@ -477,17 +477,17 @@ command_not_found_handle() {
 EOF
 grep -qxF '. /etc/claudy-host.bashrc' /etc/bash.bashrc || printf '%s\n' '. /etc/claudy-host.bashrc' >> /etc/bash.bashrc
 
-# /tmp and /dev/shm noexec on every boot (a bind mount keeps /tmp's contents if it is not
+# /tmp, /dev/shm and /run/shm (WSL mounts it separately) noexec on every boot (a bind mount keeps /tmp's contents if it is not
 # a separate mount). debconf would run package config scripts from /tmp, so apt uses /var/tmp.
 cat > /etc/systemd/system/claudy-tmp-noexec.service <<'EOF'
 [Unit]
-Description=Mount /tmp and /dev/shm noexec (claudy host: no running code from there)
+Description=Mount /tmp, /dev/shm and /run/shm noexec (claudy host: no running code from there)
 After=local-fs.target tmp.mount
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for d in /tmp /dev/shm; do mountpoint -q "$$d" || mount --bind "$$d" "$$d"; mount -o remount,bind,nosuid,nodev,noexec "$$d"; done'
+ExecStart=/bin/sh -c 'for d in /tmp /dev/shm /run/shm; do [ -d "$$d" ] && [ ! -L "$$d" ] || continue; mountpoint -q "$$d" || mount --bind "$$d" "$$d"; mount -o remount,bind,nosuid,nodev,noexec "$$d"; done'
 
 [Install]
 WantedBy=multi-user.target

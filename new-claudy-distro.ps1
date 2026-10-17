@@ -37,6 +37,10 @@ param(
     [ValidatePattern("^https://[^\s']+$")]
     [string]$RepoUrl = 'https://github.com/stain/claudy.git',
 
+    # Branch of claudy to check out and build (e.g. to test a pull request before it is merged)
+    [ValidatePattern('^[A-Za-z0-9._/-]+$')]
+    [string]$Branch = 'main',
+
     # Skip removing packages (not recommended)
     [switch]$SkipTrim,
 
@@ -184,17 +188,17 @@ command_not_found_handle() {
 EOF
 grep -qxF '. /etc/claudy-host.bashrc' /etc/bash.bashrc || printf '%s\n' '. /etc/claudy-host.bashrc' >> /etc/bash.bashrc
 
-# /tmp and /dev/shm noexec on every boot (a bind mount keeps /tmp's contents if it is not
+# /tmp, /dev/shm and /run/shm (WSL mounts it separately) noexec on every boot (a bind mount keeps /tmp's contents if it is not
 # a separate mount). debconf would run package config scripts from /tmp, so apt uses /var/tmp.
 cat > /etc/systemd/system/claudy-tmp-noexec.service <<'EOF'
 [Unit]
-Description=Mount /tmp and /dev/shm noexec (claudy host: no running code from there)
+Description=Mount /tmp, /dev/shm and /run/shm noexec (claudy host: no running code from there)
 After=local-fs.target tmp.mount
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for d in /tmp /dev/shm; do mountpoint -q "$$d" || mount --bind "$$d" "$$d"; mount -o remount,bind,nosuid,nodev,noexec "$$d"; done'
+ExecStart=/bin/sh -c 'for d in /tmp /dev/shm /run/shm; do [ -d "$$d" ] && [ ! -L "$$d" ] || continue; mountpoint -q "$$d" || mount --bind "$$d" "$$d"; mount -o remount,bind,nosuid,nodev,noexec "$$d"; done'
 
 [Install]
 WantedBy=multi-user.target
@@ -302,12 +306,14 @@ if [ -e /proc/sys/fs/binfmt_misc/WSLInterop ] || [ -e /proc/sys/fs/binfmt_misc/W
     echo "FAIL: Windows interop is still enabled" >&2; fail=1
 fi
 if [ "$(ps -p 1 -o comm=)" != systemd ]; then echo "WARNING: systemd is not running as PID 1" >&2; fi
-for d in /tmp /dev/shm; do
-    findmnt -no OPTIONS "$d" | grep -qw noexec || { echo "FAIL: $d is not mounted noexec" >&2; fail=1; }
+for d in /tmp /dev/shm /run/shm; do
+    if [ -d "$d" ] && [ ! -L "$d" ] && ! findmnt -no OPTIONS "$d" | grep -qw noexec; then
+        echo "FAIL: $d is not mounted noexec" >&2; fail=1
+    fi
 done
 rootless=$(podman info --format '{{.Host.Security.Rootless}}')
 if [ "$rootless" != true ]; then echo "FAIL: podman is not rootless" >&2; fail=1; fi
-[ "$fail" = 0 ] && echo "OK: no Windows drives, no interop, /tmp and /dev/shm noexec, rootless podman, running as $(id -un)"
+[ "$fail" = 0 ] && echo "OK: no Windows drives, no interop, /tmp, /dev/shm and /run/shm noexec, rootless podman, running as $(id -un)"
 exit "$fail"
 '@
 Invoke-InDistro $User 'Checking isolation' $check
@@ -317,12 +323,12 @@ Invoke-InDistro $User 'Checking isolation' $check
 $build = @'
 set -euo pipefail
 cd ~
-[ -d claudy/.git ] || git clone '__REPO__' claudy
+[ -d claudy/.git ] || git clone --branch '__BRANCH__' '__REPO__' claudy
 cd claudy
 podman build -t claudy .
 mkdir -p ~/bin ~/projects
 ln -sfn ~/claudy/claudy ~/bin/claudy
-'@ -replace '__REPO__', $RepoUrl
+'@ -replace '__REPO__', $RepoUrl -replace '__BRANCH__', $Branch
 if (-not $SkipBuild) {
     Invoke-InDistro $User 'Cloning claudy and building the image (takes a few minutes)' $build
 }
