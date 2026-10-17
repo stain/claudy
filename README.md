@@ -24,6 +24,18 @@ podman info --format '{{.Host.Security.Rootless}}'   # should print: true
 
 Rootless Podman maps root inside the container to your own WSL user, so files Claude creates in the project are owned by you.
 
+`claudy` also needs `python3` and Podman's default seccomp profile, `/usr/share/containers/seccomp.json` (from `containers-common`, or `golang-github-containers-common` on Debian/Ubuntu, normally installed with Podman). It derives a stricter profile from it on every start; if the file is elsewhere, set `CLAUDY_SECCOMP_BASE`.
+
+### Where to run it
+
+`claudy` works in three kinds of setup. They differ in what a container escape would reach:
+
+* **A dedicated WSL distro (recommended on Windows).** Created by `new-claudy-distro.ps1` (see *Dedicated WSL distro* below): no Windows drives or interop, trimmed, with guard rails against running code on it. The distro is only a launcher, and nothing else runs there. Required for nested mode (`CLAUDY_NESTED=1`).
+* **Your everyday WSL distro, with Windows drives and interop.** Follow *Prerequisites* and *First-time setup* as they are; skip the dedicated-distro section, its trim and its guard rails, which would get in the way of normal use. Keep projects on the Linux filesystem (`~/projects`, not `/mnt/c`). The default mode works; `claudy` refuses nested mode. Be aware that an escape from a container lands in a distro that can read and write your Windows files and start Windows programs as you, and that whatever you keep in that distro (SSH keys, tokens, other projects) is within reach. A dedicated distro costs little next to your everyday one: you can run both, with `claudy` only in the dedicated one.
+* **Plain Linux (no WSL).** Follow *Prerequisites* (with your distribution's package manager) and *First-time setup*; there is no Windows side to protect, so skip the dedicated-distro section. Nested mode works without the WSL checks. An escape lands as your Linux user, with your home directory, SSH keys and other projects. For more separation, create a separate Linux user just for `claudy` and its projects (rootless Podman needs a subuid range for it, which `adduser`/`useradd` usually adds), and keep your own keys and credentials out of that account.
+
+A planned two-user layout for the dedicated distro (*Future work* in `CLAUDE.md`) will stay optional: `claudy` keeps working for a single user in the setups above.
+
 ## First-time setup
 
 ### 1. Get the repository and build the image
@@ -225,7 +237,7 @@ Notes:
 
 Normal use doesn't strictly need this. Podman inside the container works without it, but uses user namespaces heavily (see `SECURITY.md`, *Nested containers*), so a dedicated distro is recommended if Claude will run containers, and required for `CLAUDY_NESTED=1`, which also passes `/dev/fuse` into the container and enlarges the kernel attack surface further. On WSL2 an escape would land in a distro that can read your Windows drives and start Windows programs as you, so for nested mode use a **separate WSL distro that has neither**.
 
-On a plain Linux host there is no Windows side to protect: skip this section. Nested mode is still opt-in and off by default, and `claudy` only checks the WSL conditions when it detects WSL.
+On a plain Linux host there is no Windows side to protect: skip this section (see *Where to run it*). Nested mode is still opt-in and off by default, and `claudy` only checks the WSL conditions when it detects WSL.
 
 ### Automated: `new-claudy-distro.ps1`
 
