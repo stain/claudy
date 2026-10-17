@@ -75,7 +75,7 @@ if ($versionText -match '(\d+)\.(\d+)\.(\d+)') {
 
 $existing = @(& wsl.exe --list --quiet 2>$null | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($existing -contains $Name) {
-    throw "A WSL distro named '$Name' already exists. Choose another -Name, or remove it with 'wsl --unregister $Name' (this deletes its files)."
+    throw "A WSL distro named '$Name' already exists. Choose another -Name, or remove it with 'wsl --unregister $Name' (this deletes everything in it, including projects, the Claude login and SSH key volumes; see the README)."
 }
 
 # --- Install --------------------------------------------------------------------------
@@ -146,54 +146,70 @@ $trim = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+# stdin is this script (bash -s), so nothing below may read from it
+apt_get() { apt-get -y "$@" </dev/null; }
+
 keep=(apt sudo sudo-rs systemd systemd-sysv systemd-resolved init
       dbus dbus-user-session libpam-systemd wsl-setup ca-certificates locales tzdata
       unattended-upgrades less vim vim-tiny nano git iproute2 procps nftables
       podman uidmap passt slirp4netns fuse-overlayfs crun conmon netavark aardvark-dns catatonit)
 
-remove=(
-  # GUI and desktop tools
-  code alacritty x11-utils x11-xserver-utils xauth dbus-x11 ibus-gtk3 xdg-utils
-  xdg-user-dirs mupdf-tools libnotify-bin
-  # documents
-  pandoc texlive-base texlive-binaries texlive-fonts-recommended texlive-latex-base
-  texlive-latex-extra texlive-latex-recommended texlive-luatex texlive-pictures
-  texlive-plain-generic lmodern tipa dvisvgm
-  # toolchains: these belong in the container
-  build-essential gcc g++ make dpkg-dev nodejs npm eslint webpack terser gyp
-  handlebars wabt ruby rake default-jre default-jre-headless openjdk-25-jre
-  openjdk-25-jre-headless tcl tk buildah criu
-  # remote management, telemetry, cloud and Windows integration agents
-  snapd landscape-client landscape-common ubuntu-pro-client ubuntu-pro-client-l10n
-  wsl-pro-service ubuntu-insights cloud-init cloud-init-base cloud-guest-utils
-  apport apport-core-dump-handler apport-symptoms python3-apport packagekit
-  software-properties-common update-manager-core ubuntu-release-upgrader-core
-  update-motd motd-news-config show-motd command-not-found pastebinit
-  # interactive extras and services the sandbox host doesn't need
-  byobu screen tmux htop run-one chrony rsyslog openssh-client rsync lsof lshw ethtool
+# Metapackages: removing one removes nothing else, but lets autoremove drop what only it pulled in
+meta=(ubuntu-wsl ubuntu-minimal)
+
+# What a fresh Ubuntu-26.04 WSL install still has after autoremove. Not listed on purpose:
+# cloud-init, ubuntu-insights, chrony, ethtool, gpg, dbus-x11, xdg-user-dirs and python3-*
+# (wsl-setup or the keep list need them), and Essential/required packages such as
+# coreutils, rust-coreutils or gcc-*-base.
+extra=(
+  # remote management, telemetry and Windows integration agents
+  snapd landscape-client landscape-common ubuntu-pro-client wsl-pro-service
+  apport apport-core-dump-handler software-properties-common ubuntu-release-upgrader-core
+  motd-news-config show-motd command-not-found python3-wadllib
+  # toolchains and extras the sandbox host doesn't need (the container has its own)
+  build-essential xauth byobu screen rsyslog openssh-client rsync wget bc eatmydata
 )
 
 installed() { dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' "$@" 2>/dev/null | awk '$1 == "ii" { print $2 }'; }
+# Packages an apt-get command would remove (simulated)
+removes() { apt-get -s "$@" </dev/null | awk '$1 == "Purg" || $1 == "Remv" { sub(/:.*/, "", $2); print $2 }' | sort -u; }
 
-# Protect what must stay, so removing a metapackage can't take it along
+# Mark what must stay as manually installed, so neither a metapackage removal nor autoremove takes it
 mapfile -t keep_installed < <(installed "${keep[@]}")
 apt-mark manual "${keep_installed[@]}" >/dev/null
 
-mapfile -t to_remove < <(installed "${remove[@]}")
-plan=$(apt-get -s purge --autoremove "${to_remove[@]}" | awk '$1 == "Purg" || $1 == "Remv" { sub(/:.*/, "", $2); print $2 }' | sort -u)
-bad=$(comm -12 <(printf '%s\n' "$plan") <(printf '%s\n' "${keep[@]}" | sort -u))
-if [ -n "$bad" ]; then
-    echo "Refusing to trim: it would remove required packages:" $bad >&2
-    exit 1
-fi
-if [ -n "$plan" ]; then
-    echo "Removing $(printf '%s\n' "$plan" | wc -l) packages:" $plan
-    apt-get -y purge --autoremove "${to_remove[@]}"
+# Never removed: the keep list and everything Essential or Priority: required
+protected=$({ printf '%s\n' "${keep[@]}"
+              dpkg-query -W -f='${Package} ${Essential} ${Priority}\n' | awk '$2 == "yes" || $3 == "required" { print $1 }'
+            } | sort -u)
+
+# Skip a package whose removal would take a protected one along, instead of failing
+to_remove=()
+while read -r pkg; do
+    hits=$(comm -12 <(removes remove "$pkg") <(printf '%s\n' "$protected"))
+    if [ -n "$hits" ]; then
+        echo "Keeping $pkg: removing it would also remove" $hits
+    else
+        to_remove+=("$pkg")
+    fi
+done < <(installed "${meta[@]}" "${extra[@]}")
+
+# Check the combined plan, including autoremove, before removing anything
+if [ ${#to_remove[@]} -gt 0 ]; then
+    plan=$(removes purge --autoremove "${to_remove[@]}")
+    bad=$(comm -12 <(printf '%s\n' "$plan") <(printf '%s\n' "$protected"))
+    if [ -n "$bad" ]; then
+        echo "Refusing to trim: it would remove required packages:" $bad >&2
+        exit 1
+    fi
+    echo "Removing $(printf '%s\n' "$plan" | grep -c .) packages:" $plan
+    apt_get purge --autoremove "${to_remove[@]}"
 fi
 
-# Leftover configuration of removed packages
+# Anything else left unused, and configuration of removed packages
+apt_get autoremove --purge
 mapfile -t leftover < <(dpkg -l | awk '$1 == "rc" { print $2 }')
-if [ ${#leftover[@]} -gt 0 ]; then apt-get -y purge "${leftover[@]}"; fi
+if [ ${#leftover[@]} -gt 0 ]; then apt_get purge "${leftover[@]}"; fi
 
 echo "$(dpkg-query -W -f='${db:Status-Abbrev}\n' | grep -c '^ii') packages installed"
 '@

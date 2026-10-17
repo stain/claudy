@@ -107,6 +107,10 @@ channels:
 
 The environment is ignored by git automatically; no entry in the project's `.gitignore` is needed.
 
+The image allows only these two channels for `conda install` and `conda create`; `conda env create -f` does not enforce this, so check the `channels:` of an `environment.yml` yourself.
+
+Treat `.conda_env` as belonging to the sandbox: don't activate it or run its programs on the host, and don't let a host IDE use it as an interpreter. Claude can change it without that showing in `git diff`; delete it when in doubt and it is rebuilt on the next start (see `SECURITY.md`, *The project conda env is persistent and not reviewed*).
+
 ## Opening ports (`--ports`)
 
 By default no container port is reachable from your machine, so a web app or dev server that Claude starts inside the container can't be opened in your browser. `--ports` publishes the listed ports under the same number on your host's `127.0.0.1`:
@@ -213,7 +217,31 @@ notepad new-claudy-distro.ps1
 powershell -ExecutionPolicy Bypass -File .\new-claudy-distro.ps1 -User yourname
 ```
 
+**Warning:** the script runs as you on Windows and as root inside the new distro, and `-ExecutionPolicy Bypass` skips the only check Windows would do, so reading it is the check. Only take it from this repository on GitHub, over HTTPS as above, not from a fork, a mirror, a link someone sent you, or a copy in a WSL folder or project (`\\wsl.localhost\...`) that Claude or a container could have edited. To run exactly the version you reviewed, replace `main` in the URL with a commit hash from the GitHub history.
+
 Options: `-Name` (default `claude-sandbox`), `-Distro` (default `Ubuntu-26.04`), `-Location` (folder for the virtual disk), `-SkipTrim`, `-SkipBuild`. It refuses to touch an existing distro of the same name. Afterwards, back up the result (`wsl --export claude-sandbox claude-sandbox.tar`) and continue with *Keep Claude away from the distro itself* below. The manual steps follow.
+
+### Replacing an existing distro deletes its files
+
+`wsl --unregister <name>` (needed before reusing a name, or when restoring a backup with `wsl --import`) deletes the distro's whole virtual disk. Nothing inside it survives:
+
+* your projects (`~/projects/...`), including uncommitted changes, unpushed commits, branches and stashes that exist only there, and data files that aren't in git;
+* the Podman volumes: `claude-config` (your Claude login and session history), every project's `claude-ssh-*` key (new keys are generated, so the deploy keys must be added again) and `claude-containers-*` (nested images);
+* `~/claudy` and the built images (cheap to recreate).
+
+So before replacing a distro:
+
+1. Inside the old distro, commit and push every project you want to keep (`git status` and `git log @{u}..` in each), or copy the files out.
+2. Back up the whole distro from PowerShell, so nothing is lost if you missed something: `wsl --export <name> C:\wsl\<name>-old.tar`.
+3. Prefer creating the new distro under a **new name** (`-Name claude-sandbox2`) and keep the old one until everything is moved. `new-claudy-distro.ps1` refuses to overwrite an existing distro for this reason.
+
+To move projects over directly, from PowerShell (`cmd /c` keeps the pipe binary-safe; `.conda_env` is rebuilt from `environment.yml` on the first start, so it is left out):
+
+```powershell
+cmd /c "wsl -d <old> -- tar -C ~ --exclude=.conda_env -cf - projects | wsl -d claude-sandbox -- tar -C ~ -xf -"
+```
+
+Folder paths stay the same, but the per-project SSH volumes are not copied, so each project gets a new key on its first start (`claudy pubkey`). Log in to Claude again in the new distro.
 
 ### 1. Create the distro (from PowerShell)
 
@@ -262,6 +290,7 @@ Check that the isolation works inside the distro:
 ```bash
 ls /mnt/c                   # empty or missing
 cmd.exe                     # command not found
+ls /proc/sys/fs/binfmt_misc   # no WSLInterop or WSLInterop-late
 ```
 
 ### 3. Install and use
@@ -278,15 +307,15 @@ Notes:
 * Keep projects on the distro's own filesystem (`~/projects`). Copy files in and out through `\\wsl.localhost\claude-sandbox\home\youruser` in Windows Explorer.
 * Without interop the login URL cannot open a browser: copy it from the terminal into your Windows browser by hand (the README's login steps already do this).
 * `localhost:8888` for Jupyter is still forwarded to Windows.
-* All WSL2 distros share one Linux kernel and VM. A separate distro keeps your Windows files out of reach, but it is not a separate virtual machine. The container can also still reach the network.
+* All WSL2 distros share one Linux kernel and VM. A separate distro keeps your Windows files out of reach of your user, but it is not a separate virtual machine: root in the distro can still mount them (`mount -t drvfs C: /mnt/c`), so the protection depends on nothing reaching root there (see `SECURITY.md`, *WSL2 is not a virtual machine boundary to Windows*). The container can also still reach the network.
 * `claudy` and the `Dockerfile` run with your user's rights on the host, so `git pull` only from a source you trust, and read `git diff` of those two files after pulling.
 * `claudy` refuses nested mode on WSL while `/mnt/<drive>` or interop is active. `CLAUDY_ALLOW_UNSAFE_NESTED=1` overrides this; don't.
 
 ### 4. Trim the distro
 
-The sandbox distro only has to start `claudy`: it needs the base system, systemd, `apt` with security updates, `sudo`, Podman and its helpers, `git` to update this repository, and an editor. Compilers, Node.js, Java, TeX and GUI apps belong in the container image or a project's environment, not here. Every extra package is more code running as your user next to the sandbox (setuid binaries, services, update and telemetry agents, and `wsl-pro-service`, which talks to the Windows side), so remove what you don't need. A desktop-style Ubuntu WSL install can easily carry over a thousand packages; after trimming, a few hundred remain.
+The sandbox distro only has to start `claudy`: it needs the base system, systemd, `apt` with security updates, `sudo`, Podman and its helpers, `git` to update this repository, and an editor. Compilers, Node.js, Java, TeX and GUI apps belong in the container image or a project's environment, not here. Every extra package is more code running as your user next to the sandbox (setuid binaries, services, update and telemetry agents, and `wsl-pro-service`, which talks to the Windows side), so remove what you don't need.
 
-The list below matches a typical Ubuntu 26.04 WSL install with developer tools added; adjust it to what `apt-mark showmanual` shows on yours.
+The list below matches a fresh `Ubuntu-26.04` install from `wsl --install` (about 350 packages remain after trimming); adjust it to what `apt-mark showmanual` shows on yours. If you added packages yourself (compilers, Java, TeX, GUI apps), add them to `extra`.
 
 1. **Back up first**, from PowerShell, so you can restore if something breaks:
 
@@ -303,7 +332,7 @@ The list below matches a typical Ubuntu 26.04 WSL install with developer tools a
    systemctl list-unit-files --state=enabled   # services started at boot
    ```
 
-3. **Protect what must stay** by marking it as manually installed, so that removing a metapackage (`ubuntu-minimal`, `ubuntu-wsl`) can't take it along:
+3. **Protect what must stay** by marking it as manually installed, so that removing a metapackage (`ubuntu-wsl`, `ubuntu-minimal`) or `autoremove` can't take it along:
 
    ```bash
    sudo apt-mark manual apt sudo sudo-rs systemd systemd-sysv systemd-resolved init \
@@ -312,34 +341,32 @@ The list below matches a typical Ubuntu 26.04 WSL install with developer tools a
      podman uidmap passt slirp4netns fuse-overlayfs crun conmon netavark aardvark-dns catatonit
    ```
 
-4. **Remove the rest.** Simulate first (`-s`) and read the `Remv` lines: none of the packages from step 3 may appear. Leave out anything from this list you still want (e.g. `tmux`).
+4. **Remove the metapackages, then the rest.** Removing a metapackage removes nothing by itself, but afterwards `autoremove` drops everything only it pulled in. Simulate first (`-s`) and read the `Purg`/`Remv` lines: none of the packages from step 3 may appear. If one does, take out the package that drags it along (`apt-get -s remove <pkg>` shows what each one would take). Leave out anything from this list you still want; packages that aren't installed are skipped.
 
    ```bash
-   remove=(
-     # GUI and desktop tools (no use without interop/WSLg in this distro)
-     code alacritty x11-utils x11-xserver-utils xauth dbus-x11 ibus-gtk3 xdg-utils
-     xdg-user-dirs mupdf-tools libnotify-bin
-     # documents
-     pandoc texlive-base texlive-binaries texlive-fonts-recommended texlive-latex-base
-     texlive-latex-extra texlive-latex-recommended texlive-luatex texlive-pictures
-     texlive-plain-generic lmodern tipa dvisvgm
-     # toolchains: these belong in the container
-     build-essential gcc g++ make dpkg-dev nodejs npm eslint webpack terser gyp
-     handlebars wabt ruby rake default-jre default-jre-headless openjdk-25-jre
-     openjdk-25-jre-headless tcl tk buildah criu
-     # remote management, telemetry, cloud and Windows integration agents
-     snapd landscape-client landscape-common ubuntu-pro-client ubuntu-pro-client-l10n
-     wsl-pro-service ubuntu-insights cloud-init cloud-init-base cloud-guest-utils
-     apport apport-core-dump-handler apport-symptoms python3-apport packagekit
-     software-properties-common update-manager-core ubuntu-release-upgrader-core
-     update-motd motd-news-config show-motd command-not-found pastebinit
-     # interactive extras and services the sandbox host doesn't need
-     byobu screen tmux htop run-one chrony rsyslog openssh-client rsync lsof lshw ethtool
+   # Metapackages: removing one removes nothing else, but lets autoremove drop what only it pulled in
+   meta=(ubuntu-wsl ubuntu-minimal)
+
+   # What a fresh Ubuntu-26.04 WSL install still has after autoremove. Not listed on purpose:
+   # cloud-init, ubuntu-insights, chrony, ethtool, gpg, dbus-x11, xdg-user-dirs and python3-*
+   # (wsl-setup or the keep list need them), and Essential/required packages such as
+   # coreutils, rust-coreutils or gcc-*-base.
+   extra=(
+     # remote management, telemetry and Windows integration agents
+     snapd landscape-client landscape-common ubuntu-pro-client wsl-pro-service
+     apport apport-core-dump-handler software-properties-common ubuntu-release-upgrader-core
+     motd-news-config show-motd command-not-found python3-wadllib
+     # toolchains and extras the sandbox host doesn't need (the container has its own)
+     build-essential xauth byobu screen rsyslog openssh-client rsync wget bc eatmydata
    )
-   sudo apt purge --autoremove -s "${remove[@]}" | grep '^Remv' | less
-   sudo apt purge --autoremove "${remove[@]}"
+   mapfile -t remove < <(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' "${meta[@]}" "${extra[@]}" 2>/dev/null | awk '$1 == "ii" { print $2 }')
+   sudo apt-get -s purge --autoremove "${remove[@]}" | grep -E '^(Purg|Remv)' | less
+   sudo apt-get purge --autoremove "${remove[@]}"
+   sudo apt autoremove --purge                 # anything else left unused
    sudo apt purge '~c'                         # leftover config of removed packages
    ```
+
+   Don't try to remove what is left by force: `cloud-init`, `ubuntu-insights`, `chrony`, `ethtool`, `gpg`, `dbus-x11`, `xdg-user-dirs` and the `python3-*` packages stay because `wsl-setup` or the packages from step 3 depend on them, and Essential packages (`coreutils`, `rust-coreutils`, `gcc-*-base` and other libraries) are part of the base system. Removing them takes `wsl-setup` along, which WSL needs.
 
    `openssh-client` is not needed because the distro clones this repository over HTTPS. Without `ubuntu-release-upgrader-core` there is no `do-release-upgrade`: for a new Ubuntu release, create a fresh distro instead (clone, build, link). Keep `unattended-upgrades`, which installs security updates.
 
@@ -355,7 +382,7 @@ The list below matches a typical Ubuntu 26.04 WSL install with developer tools a
    cd ~/projects/my-analysis && claudy bash -c 'podman run --rm docker.io/library/hello-world'
    ```
 
-   If something is broken and you can't fix it, restore the backup from PowerShell: `wsl --unregister claude-sandbox`, then `wsl --import claude-sandbox C:\wsl\claude-sandbox C:\wsl\claude-sandbox-before-trim.tar`. An imported distro starts as root unless `wsl.conf` has `[user]` `default = <name>` (see *If you are root* above).
+   If something is broken and you can't fix it, restore the backup from PowerShell (this discards everything done in the distro since the backup, see *Replacing an existing distro deletes its files*): `wsl --unregister claude-sandbox`, then `wsl --import claude-sandbox C:\wsl\claude-sandbox C:\wsl\claude-sandbox-before-trim.tar`. An imported distro starts as root unless `wsl.conf` has `[user]` `default = <name>` (see *If you are root* above).
 
 ### 5. Keep Claude away from the distro itself
 

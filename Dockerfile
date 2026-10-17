@@ -30,7 +30,19 @@ ENV CONDA_DIR=/opt/conda
 RUN curl -fsSL -o /tmp/miniforge.sh \
       https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
  && bash /tmp/miniforge.sh -b -p "$CONDA_DIR" \
- && rm /tmp/miniforge.sh
+ && rm /tmp/miniforge.sh \
+ # Lock channel resolution: #!final keeps a user, $CONDARC or env-level .condarc (such as
+ # /workspace/.conda_env/.condarc, which git ignores) from overriding these keys.
+ # conda create/install refuse other channels; `conda env create/update -f` (conda 26.7)
+ # does not check the allowlist, so environment.yml channels still need review.
+ && printf '%s\n' \
+      'allowlist_channels:  #!final' \
+      '  - conda-forge' \
+      '  - bioconda' \
+      'channel_alias: https://conda.anaconda.org  #!final' \
+      'custom_channels: {}  #!final' \
+      'custom_multichannels: {}  #!final' \
+      >> "$CONDA_DIR/.condarc"
 
 # Project env first on PATH for every process (claude, podman exec, VS Code terminals).
 # A non-existent PATH entry is harmless until the env has been created.
@@ -74,4 +86,5 @@ ENV SHELL=/bin/bash \
 
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["claude"]
+# Absolute path: /workspace/.conda_env/bin is first on PATH, so a `claude` there would win
+CMD ["/usr/local/bin/claude"]
