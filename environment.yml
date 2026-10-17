@@ -1,13 +1,19 @@
+# Example project environment. On every start, claudy creates or updates
+# .conda_env/ from the environment.yml in the project folder (README, "Conda environment").
+# Keep it small: uncomment or add only what the project needs.
 name: claude_sandbox
 channels:
   - conda-forge
   - bioconda
 dependencies:
   - python=3.11
-  - pandas
-  - numpy
-  - scipy
-  - snakemake
   - pip
-  - openpyxl
-  - notebook
+  # Data analysis
+  # - pandas
+  # - numpy
+  # - scipy
+  # - openpyxl          # Excel files for pandas
+  # Workflows (bioconda)
+  # - snakemake
+  # Jupyter: needed for `claudy jupyter`
+  # - notebook
