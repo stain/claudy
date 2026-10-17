@@ -6,19 +6,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       jq unzip zip patch less file nano build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-# Optional nested containers (podman inside the sandbox). Off by default: it is only useful
-# together with `CLAUDY_NESTED=1`, which gives the container /dev/fuse (see README).
-#   podman build --build-arg WITH_PODMAN=1 -t claudy-nested .
-ARG WITH_PODMAN=0
+# Podman for nested containers. Works without /dev/fuse (vfs); with `CLAUDY_NESTED=1`
+# the entrypoint switches storage to overlay on fuse-overlayfs. WITH_PODMAN=0 leaves it out.
+# Settings follow the verified recipe in etc-claude-code/CLAUDE.md: root needs a subuid/subgid
+# range, storage defaults to vfs (the entrypoint picks overlay when /dev/fuse exists), and nested containers use the host network and UTS namespace
+# (builds use chroot isolation).
+ARG WITH_PODMAN=1
 RUN if [ "$WITH_PODMAN" = 1 ]; then \
       apt-get update && apt-get install -y --no-install-recommends \
         podman fuse-overlayfs slirp4netns uidmap \
       && rm -rf /var/lib/apt/lists/* \
+      && echo 'root:1:65535' >> /etc/subuid \
+      && echo 'root:1:65535' >> /etc/subgid \
       && mkdir -p /etc/containers/registries.conf.d \
       && printf 'unqualified-search-registries = ["docker.io"]\n' > /etc/containers/registries.conf.d/10-docker.conf \
-      && printf '[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' > /etc/containers/containers.conf \
-      && printf '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\nignore_chown_errors = "true"\n' > /etc/containers/storage.conf ; \
+      && printf '[containers]\nnetns = "host"\nutsns = "host"\n[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' > /etc/containers/containers.conf \
+      && printf '[storage]\ndriver = "vfs"\nrunroot = "/run/containers/storage"\ngraphroot = "/var/lib/containers/storage"\n' > /etc/containers/storage.conf ; \
     fi
+ENV BUILDAH_ISOLATION=chroot
 
 # Miniforge: conda-forge only, no Anaconda "defaults" channel (ToS prompt / licensing)
 ENV CONDA_DIR=/opt/conda
@@ -59,6 +64,7 @@ RUN mkdir -p /etc/ssh/ssh_config.d \
  && printf 'Host *\n  IdentityFile ~/.ssh/id_ed25519\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' \
       > /etc/ssh/ssh_config.d/claudy.conf
 
+COPY etc-claude-code/CLAUDE.md /etc/claude-code/CLAUDE.md
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

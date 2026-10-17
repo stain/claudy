@@ -83,7 +83,10 @@ claudy bash                  # a shell in the same environment
 claudy snakemake --cores 4   # any command
 claudy pubkey                # this project's SSH public key
 claudy jupyter               # Jupyter on http://localhost:8888 (use the token URL it prints)
+claudy --ports 8080,5173     # Claude Code, with these ports reachable on http://localhost:<port>
 ```
+
+`--ports` (before the command, combinable with any of the above) publishes the listed container ports under the same number on the host's `127.0.0.1`, e.g. to open a dev server Claude started in your browser. The server must listen on `0.0.0.0` inside the container, not `127.0.0.1`. Use ports 1024 or higher (rootless Podman can't publish lower ones by default). Ports can only be chosen at start: to add one, exit and restart `claudy` with it. The container sees the published list in `CLAUDY_PORTS`.
 
 The project's conda environment (`/workspace/.conda_env/bin`) is on `PATH` for every command, so there is no need for `conda activate`. The entrypoint and interactive shells (via `/etc/bash.bashrc`) also activate it when it exists, and `conda activate` works in those shells.
 
@@ -151,7 +154,7 @@ Notes:
 
 ## Dedicated WSL distro for nested containers (Windows only)
 
-Normal use needs none of this. It only applies if you want Claude to run containers itself (`CLAUDY_NESTED=1`), which passes `/dev/fuse` into the container and enlarges the kernel attack surface. On WSL2 an escape would land in a distro that can read your Windows drives and start Windows programs as you, so for nested mode use a **separate WSL distro that has neither**.
+Normal use doesn't strictly need this. Podman inside the container works without it, but uses user namespaces heavily (see `SECURITY.md`, *Nested containers*), so a dedicated distro is recommended if Claude will run containers, and required for `CLAUDY_NESTED=1`, which also passes `/dev/fuse` into the container and enlarges the kernel attack surface further. On WSL2 an escape would land in a distro that can read your Windows drives and start Windows programs as you, so for nested mode use a **separate WSL distro that has neither**.
 
 On a plain Linux host there is no Windows side to protect: skip this section. Nested mode is still opt-in and off by default, and `claudy` only checks the WSL conditions when it detects WSL.
 
@@ -206,10 +209,10 @@ cmd.exe                     # command not found
 
 ### 3. Install and use
 
-Inside the distro, install the prerequisites (`sudo apt update && sudo apt install -y podman`), then follow *First-time setup* above: it clones this repository from GitHub over HTTPS, builds the image and links `claudy`. That is the only thing the isolated distro fetches from outside, so it needs no keys. For nested mode build the second image and start with the flag:
+Inside the distro, install the prerequisites (`sudo apt update && sudo apt install -y podman`), then follow *First-time setup* above: it clones this repository from GitHub over HTTPS, builds the image and links `claudy`. That is the only thing the isolated distro fetches from outside, so it needs no keys. The image includes Podman by default (build arg `WITH_PODMAN=1`, `0` leaves it out), preconfigured for nested use (subuid/subgid range, host network). Podman works without `/dev/fuse` using the `vfs` storage driver; the entrypoint switches to `overlay` on `fuse-overlayfs` when `/dev/fuse` is present, i.e. with `CLAUDY_NESTED=1`. Nested mode selects the image tag `claudy-nested`, so tag it and start with the flag:
 
 ```bash
-podman build --build-arg WITH_PODMAN=1 -t claudy-nested .
+podman build -t claudy -t claudy-nested .
 cd ~/projects/my-analysis
 CLAUDY_NESTED=1 claudy
 ```
@@ -225,7 +228,7 @@ Notes:
 
 ### 4. Keep Claude away from the distro itself
 
-Claude should be able to build and run containers for development work, but never to change its own sandbox. This holds only if you keep the roles apart:
+Claude may change the *running* container for its work (install a tool, edit `/etc`), but those changes vanish when it exits, and it can't change the image, `claudy` or anything on the host. Anything a project needs permanently, Claude sets up and documents in that project, the way the project already does it (`environment.yml`, `pyproject.toml`, a `Dockerfile`, the README), so it shows up in `git diff` for you to review. This holds only if you keep the roles apart:
 
 * **Claude runs only in the container.** Start it with `claudy`, never by running `claude` directly in the distro's shell. A Claude running in the distro shell would act as your Linux user, with your `sudo` rights and access to `~/claudy`.
 * **Never give Claude the `sudo` password.** Don't type it into a Claude prompt or into any command Claude is running, and don't answer a `sudo` password prompt that appears in a session where Claude is working. The distro's `sudo` is for you, in a separate terminal, outside `claudy`.
@@ -262,7 +265,7 @@ What it cannot see: the rest of the WSL filesystem, the Windows drives, your per
 Limits of this isolation:
 
 * **Network access is unrestricted.** Claude, or code it runs, can send anything in `/workspace` to the internet. Do not use this sandbox for data that must not leave the machine, such as Trusted Research Environment data.
-* Port 8888 is bound to `127.0.0.1` only, and only by `claudy jupyter`.
+* No ports are published by default. `claudy jupyter` (8888) and `--ports` bind to `127.0.0.1` only.
 * Avoid VS Code Dev Containers for this setup: by default they forward your SSH agent and git credentials into the container.
 * To log out everywhere: `podman volume rm claude-config`.
 
@@ -270,4 +273,4 @@ Limits of this isolation:
 
 * **`claude: command not found` / conda errors on start**: check the entrypoint output; a failed `conda env create` stops the container. Delete `.conda_env/` to start from scratch.
 * **The organisation is not offered at login**: check on claude.ai that the browser is signed in with the email your organisation's admin invited, and that the invitation has been accepted.
-* **Port 8888 already in use**: another `claudy jupyter` is running; stop it or change the host port in the `claudy` script.
+* **Port already in use** (`address already in use` from podman): another `claudy jupyter` or `claudy --ports` session holds it; stop that one or pick another port.

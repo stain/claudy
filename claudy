@@ -5,11 +5,34 @@
 #   claudy jupyter       Jupyter Notebook on http://localhost:8888
 #   claudy pubkey        print this project's SSH public key
 #
+# Options (before the command):
+#   --ports 8080,8081    publish these container ports 1:1 on 127.0.0.1 of the host,
+#                        e.g. for a dev server (it must listen on 0.0.0.0 inside)
+#
 # Nested containers (podman inside the sandbox) are opt-in and need the nested image:
 #   CLAUDY_NESTED=1 claudy
 # This passes /dev/fuse into the container. On WSL2 it refuses to run unless the
 # distro has Windows drives and interop disabled (see README, "Dedicated WSL distro").
 set -euo pipefail
+
+ports=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ports=*) list=${1#--ports=}; shift ;;
+    --ports)
+      [ $# -ge 2 ] || { echo "claudy: --ports needs a comma-separated list, e.g. --ports 8080,8081" >&2; exit 1; }
+      list=$2; shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+  IFS=, read -r -a items <<< "$list"
+  for p in "${items[@]}"; do
+    if ! [[ $p =~ ^[0-9]+$ ]] || [ "$p" -lt 1 ] || [ "$p" -gt 65535 ]; then
+      echo "claudy: invalid port '$p' (expected 1-65535)" >&2; exit 1
+    fi
+    ports+=("$((10#$p))")
+  done
+done
 
 NESTED=${CLAUDY_NESTED:-0}
 if [ "$NESTED" = 1 ]; then
@@ -67,8 +90,18 @@ if [ "${1:-}" = pubkey ]; then
 fi
 
 if [ "${1:-}" = jupyter ]; then
-  opts+=(-p 127.0.0.1:8888:8888)
+  ports+=(8888)
   set -- jupyter notebook --ip=0.0.0.0 --no-browser --allow-root
+fi
+
+# Published ports: host loopback only, same number inside and out. CLAUDY_PORTS tells
+# the container which ports the user can reach from the host.
+if [ ${#ports[@]} -gt 0 ]; then
+  mapfile -t ports < <(printf '%s\n' "${ports[@]}" | sort -nu)
+  for p in "${ports[@]}"; do
+    opts+=(-p "127.0.0.1:$p:$p")
+  done
+  opts+=(-e CLAUDY_PORTS="$(IFS=,; echo "${ports[*]}")")
 fi
 
 exec podman run "${opts[@]}" "$IMAGE" "$@"
