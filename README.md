@@ -172,20 +172,37 @@ On **GitHub** do the same under the repository's *Settings → Deploy keys* (tic
 
 ### Checking out a repository
 
-Start in an **empty folder** and clone from inside `claudy` over SSH, so no HTTPS password or token is ever typed into (or stored by) the container:
+Each repository gets its own folder, and that folder *is* the repository: the folder you start `claudy` in becomes `/workspace`, so the checkout must land directly in it, not in a subfolder. Clone over SSH from inside `claudy`, so no HTTPS password or token is ever typed into (or stored by) the container.
 
 ```bash
-mkdir my-project && cd my-project
-claudy bash                      # first start prints the project's public key
-# add the key as a deploy key (see above), then inside the container:
-git clone git@github.com:owner/repo.git .     # or git@gitlab.com:group/repo.git .
+mkdir -p ~/projects/project5 && cd ~/projects/project5   # new, empty folder for this repository
+claudy pubkey                                            # first start: generates this folder's key and prints it
+```
+
+**Pause here** and add the printed key as a deploy key on that one repository (see above). Until it is added, cloning fails with `Permission denied (publickey)`. Check that it works, then clone into the current folder (note the final `.`) and start Claude:
+
+```bash
+claudy ssh -T git@github.com                              # "Hi owner/repo! You've successfully authenticated..."
+claudy git clone git@github.com:owner/repo.git .          # or git@gitlab.com:group/repo.git .
+claudy                                                    # Claude Code in the checkout
+```
+
+The result:
+
+```
+~/projects/project5/            = /workspace in the container = the repository root
+├── .git/
+├── environment.yml             (if the project has one; .conda_env/ is created next to it on the next start)
+└── ...
 ```
 
 Notes:
 
-* The key is tied to the folder's path, so clone into `.` (the folder you started `claudy` in) and don't move or rename the folder afterwards, or it gets a new key and the deploy key must be re-added.
+* **Clone into `.`**, not `claudy git clone git@...:owner/repo.git` without it: that would put the checkout in `~/projects/project5/repo`, one level down, so Claude would start outside the repository and `environment.yml` would not be found.
+* **Don't run `claudy` from `~/projects` itself**, e.g. to clone several repositories at once. That mounts every project into one container, under one shared key named after `~/projects`, which undoes the per-project separation.
+* The key is tied to the folder's path, so don't move or rename the folder afterwards, or it gets a new key and the deploy key must be added again.
+* `git clone` into `.` needs an empty folder. `claudy pubkey` writes nothing into it (the key lives in a Podman volume), so the order above works.
 * If you cloned with `https://` elsewhere, switch it with `git remote set-url origin git@host:owner/repo.git`. Don't enter HTTPS credentials in the container: a stored password or token would be readable by Claude and usable on every repository your account can reach.
-* `git clone` refuses a non-empty folder; that is why the empty folder comes first.
 
 Deploy keys only give git access. They cannot open merge/pull requests or issues through an API.
 
@@ -212,7 +229,7 @@ On a plain Linux host there is no Windows side to protect: skip this section. Ne
 
 ### Automated: `new-claudy-distro.ps1`
 
-`new-claudy-distro.ps1` does steps 1 to 4 below, plus the first-time setup, in one go from Windows. It installs the distro, creates your user (asking for its password), writes `/etc/wsl.conf`, installs Podman, git and vim, removes the packages listed in step 4, restarts the distro, checks that the Windows drives and interop are gone, then clones this repository over HTTPS, builds the image and links `~/bin/claudy`. The Linux part is plain bash embedded in the script and piped into `wsl.exe`; read it before running.
+`new-claudy-distro.ps1` does steps 1 to 5 below, plus the first-time setup, in one go from Windows. It installs the distro, creates your user (asking for its password), writes `/etc/wsl.conf`, installs Podman, git and vim, removes the packages listed in step 4, restarts the distro, checks that the Windows drives and interop are gone, then clones this repository over HTTPS, builds the image and links `~/bin/claudy`. The Linux part is plain bash embedded in the script and piped into `wsl.exe`; read it before running.
 
 Download it from GitHub (it is a single file), read it, then run it from PowerShell:
 
@@ -415,7 +432,80 @@ The list below matches a fresh `Ubuntu-26.04` install from `wsl --install` (abou
 
    If something is broken and you can't fix it, restore the backup from PowerShell (this discards everything done in the distro since the backup, see *Replacing an existing distro deletes its files*): `wsl --unregister claude-sandbox`, then `wsl --import claude-sandbox C:\wsl\claude-sandbox C:\wsl\claude-sandbox-before-trim.tar`. An imported distro starts as root unless `wsl.conf` has `[user]` `default = <name>` (see *If you are root* above).
 
-### 5. Keep Claude away from the distro itself
+### 5. Guard rails against running code on the distro
+
+The distro is only a launcher. Project code, tests and dev servers belong in `claudy` containers (see *Keep Claude away from the distro itself*). Three guard rails make the wrong path fail loudly; `new-claudy-distro.ps1` sets them all up. They stop accidents, not a determined user with `sudo`.
+
+* **apt refuses development tools and SSH.** `/etc/apt/preferences.d/claudy-no-dev-tools.pref` pins `openssh-client`, compilers, `make`, Node.js, `pip`/`venv`, Java, Go, Rust, Ruby, Docker and friends to priority -1, so `sudo apt install nodejs` reports *no installation candidate*. Python itself stays: `wsl-setup`, netplan and `claudy` (to build its seccomp profile) need it.
+* **The shell reminds you where you are.** Interactive shells show a red `[claudy host]` prompt marker, print a warning when you `cd` into a project under `~/projects`, and answer a missing command with a hint to run it through `claudy` instead.
+* **`/tmp` and `/dev/shm` are mounted `noexec`** at every boot (`claudy-tmp-noexec.service`), so a binary downloaded or unpacked there can't be started. apt is told to use `/var/tmp` for package configuration scripts, which would otherwise fail. `~/projects` is deliberately *not* `noexec`: the container's `/workspace` is a bind mount of it and would inherit the flag, breaking every script and conda program inside `claudy`.
+
+To set them up by hand, as root (`sudo -i`):
+
+```bash
+# apt refuses to install development tools and SSH here (README, "Guard rails")
+cat > /etc/apt/preferences.d/claudy-no-dev-tools.pref <<'EOF'
+# claudy sandbox distro: development tools and SSH belong inside claudy containers, not on
+# this host (README, "Guard rails"). Deleting this file gives that protection up.
+Package: openssh-client openssh-server build-essential gcc g++ clang make cmake nodejs npm python3-pip python3-venv pipx default-jdk default-jdk-headless default-jre default-jre-headless openjdk-* golang-go rustc cargo ruby docker.io docker-ce containerd snapd code
+Pin: release a=*
+Pin-Priority: -1
+EOF
+
+# Shell nudge: a prompt marker, a warning on entering a project, a hint for missing tools
+cat > /etc/claudy-host.bashrc <<'EOF'
+# claudy sandbox distro: this shell is the host, not the sandbox (README, "Guard rails").
+case $- in *i*) ;; *) return ;; esac
+_claudy_host_project=
+_claudy_host_prompt() {
+    case $PS1 in *'[claudy host]'*) ;; *) PS1='\[\e[1;31m\][claudy host]\[\e[0m\] '"$PS1" ;; esac
+    case $PWD/ in
+        "$HOME"/projects/?*/*)
+            local p=${PWD#"$HOME"/projects/}; p=${p%%/*}
+            if [ "$p" != "$_claudy_host_project" ]; then
+                _claudy_host_project=$p
+                printf '\e[1;31mclaudy host:\e[0m run project code in the sandbox: claudy bash, claudy <command>\n' >&2
+            fi ;;
+        *) _claudy_host_project= ;;
+    esac
+}
+PROMPT_COMMAND="_claudy_host_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+command_not_found_handle() {
+    printf '%s: not installed on the claudy host on purpose; run it in the sandbox: claudy %s\n' "$1" "$*" >&2
+    return 127
+}
+EOF
+grep -qxF '. /etc/claudy-host.bashrc' /etc/bash.bashrc || printf '%s\n' '. /etc/claudy-host.bashrc' >> /etc/bash.bashrc
+
+# /tmp and /dev/shm noexec on every boot (a bind mount keeps /tmp's contents if it is not
+# a separate mount). debconf would run package config scripts from /tmp, so apt uses /var/tmp.
+cat > /etc/systemd/system/claudy-tmp-noexec.service <<'EOF'
+[Unit]
+Description=Mount /tmp and /dev/shm noexec (claudy host: no running code from there)
+After=local-fs.target tmp.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for d in /tmp /dev/shm; do mountpoint -q "$$d" || mount --bind "$$d" "$$d"; mount -o remount,bind,nosuid,nodev,noexec "$$d"; done'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+mkdir -p /etc/systemd/system/multi-user.target.wants
+ln -sfn /etc/systemd/system/claudy-tmp-noexec.service /etc/systemd/system/multi-user.target.wants/claudy-tmp-noexec.service
+printf '%s\n' 'APT::ExtractTemplates::TempDir "/var/tmp";' > /etc/apt/apt.conf.d/50claudy-tmp-noexec
+systemctl daemon-reload && systemctl start claudy-tmp-noexec.service
+```
+
+**If you deliberately give a guard rail up**, know what you lose: every tool you install runs as your user next to the sandbox, outside any container, and is reachable after an escape. Prefer another WSL distro (or machine) for that work; it costs nothing to keep one. If it has to be this distro:
+
+* Remove only the package you need from the `Package:` line of the pin file rather than deleting the file, install it, and when you are done `sudo apt purge --autoremove <pkg>` and put the name back.
+* Never reinstall `openssh-client` or add SSH keys or git credentials here (see *Keep Claude away from the distro itself*); that undoes the per-project deploy keys.
+* For `/tmp`, `sudo mount -o remount,exec /tmp` lasts until the next restart of the distro; don't disable the service.
+* Note what you changed, so you can undo it, or recreate the distro from `new-claudy-distro.ps1` (see *Replacing an existing distro deletes its files*).
+
+### 6. Keep Claude away from the distro itself
 
 Claude may change the *running* container for its work (install a tool, edit `/etc`), but those changes vanish when it exits, and it can't change the image, `claudy` or anything on the host. Anything a project needs permanently, Claude sets up and documents in that project, the way the project already does it (`environment.yml`, `pyproject.toml`, a `Dockerfile`, the README), so it shows up in `git diff` for you to review. This holds only if you keep the roles apart:
 
@@ -427,7 +517,7 @@ Claude may change the *running* container for its work (install a tool, edit `/e
 * **Keep `~/claudy` out of the mounted project folder** and never run `claudy` from inside it (or from its parent directory), because the project folder is writable by Claude, and `claudy`, `Dockerfile` and `entrypoint.sh` are executed with your rights.
 * **Don't put credentials for this distro into a project**: no `~/.ssh` keys, tokens or `.env` files holding secrets you wouldn't give to Claude.
 * **No SSH keys or git credentials in the distro, and no `ssh` client.** The trim removes `openssh-client` on purpose, and the distro only fetches this repository over HTTPS. Git access for projects belongs to the per-project deploy keys inside `claudy` containers, one key per project and repository. A key, SSH agent, token or credential helper (`~/.git-credentials`) in the distro itself would reach every repository it is allowed on, and would be the first thing an escape from a container finds, which undoes the point of separate keys. Don't reinstall `openssh-client` or add keys there; push and pull projects from inside `claudy`, and maintain this repository (push, pull requests) from your normal environment, not from this distro.
-* **Don't use the distro to run or test your applications.** Project code, test suites, dev servers, notebooks and `make` run in the distro shell would run as your user outside the container, with the access the sandbox is meant to keep from them, and would need the toolchains the trim removed. Run them inside `claudy` (`claudy bash`, `claudy --ports ...`, `claudy jupyter`). The distro is only a launcher: Podman, git for this repository, and an editor.
+* **Don't use the distro to run or test your applications** (the guard rails in step 5 help you notice). Project code, test suites, dev servers, notebooks and `make` run in the distro shell would run as your user outside the container, with the access the sandbox is meant to keep from them, and would need the toolchains the trim removed. Run them inside `claudy` (`claudy bash`, `claudy --ports ...`, `claudy jupyter`). The distro is only a launcher: Podman, git for this repository, and an editor.
 
 ## Updating Claude Code
 
