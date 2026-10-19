@@ -30,7 +30,7 @@ podman info --format '{{.Host.Security.Rootless}}'   # should print: true
 
 Rootless Podman maps root inside the container to your own WSL user, so files Claude creates in the project are owned by you.
 
-`claudy` also needs `python3` and Podman's default seccomp profile, `/usr/share/containers/seccomp.json` (from `containers-common`, or `golang-github-containers-common` on Debian/Ubuntu, normally installed with Podman). It derives a stricter profile from it on every start; if the file is elsewhere, set `CLAUDY_SECCOMP_BASE`.
+`claudy` also needs `python3` and Podman's default seccomp profile, `/usr/share/containers/seccomp.json` (from `containers-common`, or `golang-github-containers-common` on Debian/Ubuntu, normally installed with Podman). It derives a stricter profile from it on every start; if the file is elsewhere, set `CLAUDY_SECCOMP_BASE`. The derived profile disables 32-bit binaries (32-bit x86 isn't supported).
 
 ### Where to run it
 

@@ -87,8 +87,10 @@ opts=(-it --rm
 # Seccomp: Podman's default profile, minus vsock. On WSL2 vsock is how the VM talks to
 # Windows (interop, drvfs), and network namespaces don't isolate it. Every ALLOW rule for
 # socket() gets "domain != AF_VSOCK" (a rule that already tests the domain loses socket;
-# libseccomp can't compare one argument twice). socketcall (32-bit multiplexer) and
-# io_uring could create sockets past that filter, so they are removed. Derived on every
+# libseccomp can't compare one argument twice, unless the profile already denies AF_VSOCK
+# itself, as newer Podman defaults do). socketcall (32-bit multiplexer) and
+# io_uring could create sockets past that filter, so they are removed, and with them the
+# 32-bit sub-architectures (no 32-bit binaries in the container). Derived on every
 # start, so it follows the installed Podman's defaults.
 SECCOMP_BASE=${CLAUDY_SECCOMP_BASE:-/usr/share/containers/seccomp.json}
 seccomp_dir=${XDG_CACHE_HOME:-$HOME/.cache}/claudy
@@ -100,22 +102,35 @@ AF_VSOCK = 40
 REMOVE = {"socketcall", "io_uring_setup", "io_uring_enter", "io_uring_register"}
 with open(sys.argv[1]) as f:
     profile = json.load(f)
+def tests_domain(rule):
+    return any(a["index"] == 0 for a in rule.get("args") or [])
+# Newer Podman profiles deny AF_VSOCK themselves (an ERRNO rule for socket() with domain 40)
+# and their ALLOW rules already test the domain; those are kept as they are.
+denied = any("socket" in r["names"] and r.get("action") in ("SCMP_ACT_ERRNO", "SCMP_ACT_KILL")
+            and any(a["index"] == 0 and a["op"] == "SCMP_CMP_EQ" and a["value"] == AF_VSOCK
+                    for a in r.get("args") or [])
+            and not r.get("includes") and not r.get("excludes")
+            for r in profile["syscalls"])
 rules = []
 for rule in profile["syscalls"]:
     names = rule.get("names", [])
     if rule.get("action") != "SCMP_ACT_ALLOW" or not (set(names) & (REMOVE | {"socket"})):
         rules.append(rule)
         continue
-    rest = [n for n in names if n not in REMOVE and n != "socket"]
+    keep_socket = "socket" in names and tests_domain(rule) and denied
+    rest = [n for n in names if n not in REMOVE and (n != "socket" or keep_socket)]
     if rest:
         rules.append(dict(rule, names=rest))
-    args = rule.get("args") or []
-    if "socket" in names and not any(a["index"] == 0 for a in args):
+    if "socket" in names and not tests_domain(rule):
         rules.append(dict(rule, names=["socket"],
-                          args=args + [{"index": 0, "value": AF_VSOCK, "valueTwo": 0, "op": "SCMP_CMP_NE"}]))
+                          args=(rule.get("args") or []) + [{"index": 0, "value": AF_VSOCK, "valueTwo": 0, "op": "SCMP_CMP_NE"}]))
 if not any("socket" in r["names"] and r.get("action") == "SCMP_ACT_ALLOW" for r in rules):
     sys.exit("no ALLOW rule for socket() left")
 profile["syscalls"] = rules
+# Without socketcall, libseccomp can't add the socket() rules for the 32-bit sub-architectures
+# (EEXIST), and 32-bit syscalls would bypass the domain test anyway: allow the native one only.
+for entry in profile.get("archMap", []):
+    entry["subArchitectures"] = []
 with open(sys.argv[2], "w") as f:
     json.dump(profile, f)
 PY
