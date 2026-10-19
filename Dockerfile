@@ -20,7 +20,7 @@ RUN if [ "$WITH_PODMAN" = 1 ]; then \
       && echo 'root:1:65535' >> /etc/subgid \
       && mkdir -p /etc/containers/registries.conf.d \
       && printf 'unqualified-search-registries = ["docker.io"]\n' > /etc/containers/registries.conf.d/10-docker.conf \
-      && printf '[containers]\nnetns = "host"\nutsns = "host"\n[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' > /etc/containers/containers.conf \
+      && printf '[containers]\nnetns = "host"\npidns = "host"\nutsns = "host"\n[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' > /etc/containers/containers.conf \
       && printf '[storage]\ndriver = "vfs"\nrunroot = "/run/containers/storage"\ngraphroot = "/var/lib/containers/storage"\n' > /etc/containers/storage.conf ; \
     fi
 ENV BUILDAH_ISOLATION=chroot

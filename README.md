@@ -380,7 +380,7 @@ ls /proc/sys/fs/binfmt_misc   # no WSLInterop or WSLInterop-late
 
 ### 3. Install and use
 
-Inside the distro, install the prerequisites (`sudo apt update && sudo apt install -y podman`), then follow *First-time setup* above: it clones this repository from GitHub over HTTPS, builds the image and links `claudy`. That is the only thing the isolated distro fetches from outside, so it needs no keys. The image includes Podman by default (build arg `WITH_PODMAN=1`, `0` leaves it out), preconfigured for nested use (subuid/subgid range, host network). Podman works without `/dev/fuse` using the `vfs` storage driver; the entrypoint switches to `overlay` on `fuse-overlayfs` when `/dev/fuse` is present, i.e. with `CLAUDY_NESTED=1`. Nested mode uses the same image; start it with the flag:
+Inside the distro, install the prerequisites (`sudo apt update && sudo apt install -y podman`), then follow *First-time setup* above: it clones this repository from GitHub over HTTPS, builds the image and links `claudy`. That is the only thing the isolated distro fetches from outside, so it needs no keys. The image includes Podman by default (build arg `WITH_PODMAN=1`, `0` leaves it out), preconfigured for nested use (subuid/subgid range, host network and PID namespace). Podman works without `/dev/fuse` using the `vfs` storage driver; the entrypoint switches to `overlay` on `fuse-overlayfs` when `/dev/fuse` is present, i.e. with `CLAUDY_NESTED=1`. Nested mode uses the same image; start it with the flag:
 
 ```bash
 cd ~/projects/my-analysis
