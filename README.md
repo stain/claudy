@@ -230,6 +230,7 @@ Notes:
 * **Clone into `.`**, not `claudy git clone git@...:owner/repo.git` without it: that would put the checkout in `~/projects/project5/repo`, one level down, so Claude would start outside the repository and `environment.yml` would not be found.
 * **Don't run `claudy` from `~/projects` itself**, e.g. to clone several repositories at once. That mounts every project into one container, under one shared key named after `~/projects`, which undoes the per-project separation.
 * The key is tied to the folder's path, so don't move or rename the folder afterwards, or it gets a new key and the deploy key must be added again.
+* Starting `claudy` in a subfolder of a project makes the subfolder a project of its own, with its own key, conda env and conversations. `claudy` warns when a parent folder was already used as a project, then starts anyway.
 * `git clone` into `.` needs an empty folder. `claudy pubkey` writes nothing into it (the key lives in a Podman volume), so the order above works.
 * If you cloned with `https://` elsewhere, switch it with `git remote set-url origin git@host:owner/repo.git`. Don't enter HTTPS credentials in the container: a stored password or token would be readable by Claude and usable on every repository your account can reach.
 
