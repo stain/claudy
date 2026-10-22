@@ -63,6 +63,8 @@ while [ "$dir" != / ]; do
   if grep -qxF "claude-ssh-$dir_id" <<< "$volumes" || [ -f "$dir/.conda_env/.environment.yml.stamp" ]; then
     echo "claudy: $dir is already a claudy project; starting one for the subfolder $PWD instead" >&2
     echo "            (own SSH key, conda env and conversations; cd $dir to use the parent's)." >&2
+    echo "            Starting in 5 seconds; press Ctrl-C to stop." >&2
+    sleep 5
     break
   fi
   dir=$(dirname "$dir")
