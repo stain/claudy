@@ -53,6 +53,23 @@ hash=$(printf '%s' "$PWD" | sha256sum | cut -c1-8)
 project_id=${project//[^A-Za-z0-9_.-]/_}-$hash
 SSH_VOLUME=${CLAUDY_SSH:-claude-ssh-$project_id}
 
+# Warn (don't refuse) when a parent folder was already used as a claudy project: this
+# subfolder gets its own key, conda env and conversation history, and the parent's
+# files are not mounted. Signs: the parent's SSH volume, or the entrypoint's env stamp.
+volumes=$(podman volume ls --format '{{.Name}}' 2>/dev/null || true)
+dir=$(dirname "$PWD")
+while [ "$dir" != / ]; do
+  dir_id=$(basename "$dir"); dir_id=${dir_id//[^A-Za-z0-9_.-]/_}-$(printf '%s' "$dir" | sha256sum | cut -c1-8)
+  if grep -qxF "claude-ssh-$dir_id" <<< "$volumes" || [ -f "$dir/.conda_env/.environment.yml.stamp" ]; then
+    echo "claudy: $dir is already a claudy project; starting one for the subfolder $PWD instead" >&2
+    echo "            (own SSH key, conda env and conversations; cd $dir to use the parent's)." >&2
+    echo "            Starting in 5 seconds; press Ctrl-C to stop." >&2
+    sleep 5
+    break
+  fi
+  dir=$(dirname "$dir")
+done
+
 # Warn (don't rebuild) when the image is older than the files it is built from, e.g.
 # after a git pull: this script takes effect at once, the image only after a rebuild.
 repo=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
