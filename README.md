@@ -191,18 +191,19 @@ Notebooks are saved in the project folder. The Jupyter server runs with the same
 `claudy vscode` runs VS Code's web server inside the container and publishes its port on your host's `127.0.0.1`, like `--ports` does:
 
 ```bash
-claudy vscode                          # http://localhost:8000, open the URL with the token it prints
+claudy vscode                          # port 8000; open the URL with the token it prints
 CLAUDY_VSCODE_PORT=8001 claudy vscode  # another port (1024 or higher), e.g. for a second project
 claudy --ports 5173 vscode             # also publish 5173, e.g. for a dev server started in a VS Code terminal
 ```
 
-* **Open the printed URL**, which carries a token that is new on every start; without it the server refuses the connection. Use the **separate browser profile** from *Opening ports*: VS Code, and the extensions you add, run their pages in your browser.
+* **Open the printed URL**, which carries a token that is new on every start; without it the server refuses the connection. Its host name, `vscode-<project>.localhost`, is the project's own, so the browser keeps the token's cookie away from dev servers, Jupyter and other projects on `localhost` (Chrome, Edge and Firefox send any `*.localhost` name to your machine). Use the **separate browser profile** from *Opening ports*: VS Code, and the extensions you add, run their pages in your browser.
 * **Terminals in VS Code are inside the container**, with the same environment as `claudy bash`: the project's conda env, git author, SSH key and Claude login. Without `CLAUDY_GIT_*`, Source Control commits with your git config rather than the sandbox placeholder (*Commit author*). Run `claude` in one to use Claude Code next to the editor; it keeps the same conversations and memory as plain `claudy`, as it runs in the same project folder. Inside, `CLAUDY_VSCODE_PORT` tells Claude that port is taken.
 * **Stopping**: press Ctrl-C in the host terminal where `claudy vscode` runs. That ends the editor and every terminal in it, including Claude sessions. Closing the browser tab doesn't: the server keeps terminals alive, so you can reload the page.
 * **Keyboard**: the browser keeps some shortcuts, such as Ctrl-W (closes the tab, where a terminal would delete a word), Ctrl-T and Ctrl-N. Installing the page as an app (*Install* in Chrome or Edge) gives most of them to VS Code.
 * **Downloads and storage**: the image contains the VS Code command-line tool. On first start it downloads the VS Code server from Microsoft, several hundred MB, into a per-project volume, `claude-vscode-<folder>-<hash>`, which also keeps installed extensions. `podman volume rm` it to start over. Extensions are separate per project on purpose: a shared volume would let an extension installed in one project run in all of them.
 * **Licence**: VS Code Server is under Microsoft's licence terms, which `claudy vscode` accepts on your behalf when it starts the server (it prints the link). Telemetry is turned off. If you don't want it in the image, build with `--build-arg WITH_VSCODE=0`.
 * Extensions run inside the container, with the same access as Claude: the project folder, its SSH key, the Claude login and the network. Install only those you trust.
+* **It looks like your local VS Code, but runs in the container.** Accounts you sign in to, Settings Sync, tokens typed into its terminals, and files you drag in all end up inside, within Claude's reach; files you download from it leave the sandbox. Keep sync and accounts signed out, and don't open the folder in your desktop VS Code without reviewing `.vscode` (`SECURITY.md`, *VS Code in the browser*).
 * This is not VS Code Dev Containers (see *Security notes*): your desktop VS Code, its SSH agent and git credentials are not involved.
 
 ## Git, GitLab and GitHub (SSH)
@@ -650,6 +651,8 @@ Risks to be aware of (each explained in `SECURITY.md`):
 * **On WSL2 the dedicated distro is not a virtual machine**: root in the distro can reach your Windows files, so nothing from a container may get there, and never type the `sudo` password where Claude or code it ran could see it (*WSL2 is not a virtual machine boundary to Windows*).
 * **What you run or open outside the container is outside the sandbox**: scripts, hooks and notebooks from the project, its `.conda_env`, and pages from `--ports`, Jupyter or `claudy vscode` in your browser (*The project folder is writable*, *The project conda env*, *Published ports*).
 * **The image could be swapped under you**: anything running as your user on the host can replace the `claudy` image, and the next start runs it with your project and login. Rebuild from a reviewed checkout (*The image can be replaced without notice*).
+* **Instructions are not enforcement**: plugins, skills, hooks and tool servers you install, files and web pages Claude reads, and its own possibly outdated knowledge can steer it past any instruction; connectors to your other accounts are outside the container entirely (*Plugins, skills, tool servers and connectors*, *What Claude knows or finds online*).
+* **VS Code in the browser** runs extensions with Claude's access and makes it easy to bring credentials, sync or downloads across the boundary (*VS Code in the browser*).
 * **Deploy keys reach beyond the container**: a write key can push to any branch and start CI (*SSH deploy keys reach beyond the container*).
 * **Network access is unrestricted.** Claude, or code it runs, can send anything in `/workspace` to the internet. Do not use this sandbox for data that must not leave the machine, such as Trusted Research Environment data.
 * No ports are published by default. `claudy jupyter` (8888), `claudy vscode` (8000) and `--ports` bind to `127.0.0.1` only.

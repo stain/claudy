@@ -15,7 +15,14 @@ umask 077
 TOKEN_FILE=/run/claudy-vscode-token
 head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > "$TOKEN_FILE"
 
-echo "VS Code (open in a separate browser profile): http://localhost:$PORT/?tkn=$(cat "$TOKEN_FILE")" >&2
+# The server keeps the token in a cookie that scripts can read and that the browser shares
+# with every port of the same host name. A host name of its own per project (browsers send
+# *.localhost to loopback) keeps pages from dev servers, Jupyter or other projects' VS Code
+# on plain localhost from reading or sending it.
+label=$(printf '%s' "${CLAUDY_PROJECT:-project}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9' '-' | tr -s '-' | cut -c1-40 | sed 's/^-//; s/-$//')
+host="vscode-${label:-project}.localhost"
+echo "VS Code (open in a separate browser profile): http://$host:$PORT/?tkn=$(cat "$TOKEN_FILE")" >&2
+echo "If your browser can't resolve $host, use localhost instead, but then don't open other pages on localhost in that profile." >&2
 echo "By using it you accept the VS Code Server license terms: https://aka.ms/vscode-server-license" >&2
 
 # Commit identity: the image's placeholder (Claude Sandbox) labels Claude's commits only.
