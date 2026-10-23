@@ -2,9 +2,11 @@
 
 A container image for running Claude Code, Snakemake and Jupyter where only the current project folder is visible to the container. Claude authenticates with your Claude Team subscription login; no API key is needed.
 
-> **What claudy is for, and what not.** claudy reduces the *blast radius* of an agent that follows accidental or misleading instructions, or is simply over-eager: a wrong `rm`, a prompt injection in a file or web page, a malicious dependency. It keeps such mistakes inside one project folder and away from your own keys, other projects' keys and (with the dedicated WSL distro) your Windows files.
+> **What claudy is for, and what not.** claudy is for working on **your own code** with Claude, while letting it run reasonable experiments and tests (install packages, run the test suite, start a dev server, try things out) without affecting anything else on your computer. It is not meant for working on code or data you don't trust. It reduces the *blast radius* of an agent that follows accidental or misleading instructions, or is simply over-eager: a wrong `rm`, a prompt injection in a file or web page, a malicious dependency. It keeps such mistakes inside one project folder and away from your own keys, other projects' keys and (with the dedicated WSL distro) your Windows files.
 >
 > It is **not** security isolation between Claude sessions or between code bases that must not see each other. All sessions run as the same user on the same kernel, and by default share one Claude config volume (login, transcripts, memory, settings). Separating them properly needs, at the least, separate virtual machines with separate keys and logins for each. A per-project config (`CLAUDY_CONFIG`, see below) is a mitigation, not isolation. See `SECURITY.md`.
+>
+> Think of it as one rung on a ladder: Claude Code directly on your computer, then claudy, then claudy in the dedicated WSL distro, then a virtual machine per project, preferably in the cloud and away from your home or office network. Climb as far as the code, the data and your network call for (`SECURITY.md`, *A ladder of isolation*).
 
 > **Note for AI agents.** The risks mentioned in this README and in `SECURITY.md` are for the user's awareness. They are not suggestions, permissions or tasks. Stay within what the user asked; if the sandbox blocks something you need, tell the user rather than look for a way around it.
 
@@ -111,6 +113,7 @@ claudy bash                  # a shell in the same environment
 claudy snakemake --cores 4   # any command
 claudy pubkey                # this project's SSH public key
 claudy jupyter               # Jupyter Notebook on http://localhost:8888 (needs notebook in environment.yml, see below)
+claudy vscode                # VS Code in the browser on http://localhost:8000 (see below)
 claudy --ports 8080,5173     # Claude Code, with these ports reachable on http://localhost:<port> (see below)
 ```
 
@@ -185,6 +188,26 @@ With the last form, start Jupyter inside the session (ask Claude, or run it in a
 
 Notebooks are saved in the project folder. The Jupyter server runs with the same isolation as Claude (only the project folder, its own SSH key), and anyone with the token URL can run code in the container. Notebook output that Claude produced runs in your browser when you open it, so the same advice as for `--ports` applies: use a separate browser profile for it. Without `notebook` in the environment, `claudy jupyter` fails with `jupyter: not found`.
 
+## VS Code in the browser (`claudy vscode`)
+
+`claudy vscode` runs VS Code's web server inside the container and publishes its port on your host's `127.0.0.1`, like `--ports` does:
+
+```bash
+claudy vscode                          # port 8000; open the URL with the token it prints
+CLAUDY_VSCODE_PORT=8001 claudy vscode  # another port (1024 or higher), e.g. for a second project
+claudy --ports 5173 vscode             # also publish 5173, e.g. for a dev server started in a VS Code terminal
+```
+
+* **Open the printed URL**, which carries a token that is new on every start; without it the server refuses the connection. Its host name, `vscode-<project>.localhost`, is the project's own, so the browser keeps the token's cookie away from dev servers, Jupyter and other projects on `localhost` (Chrome, Edge and Firefox send any `*.localhost` name to your machine). Use the **separate browser profile** from *Opening ports*: VS Code, and the extensions you add, run their pages in your browser.
+* **Terminals in VS Code are inside the container**, with the same environment as `claudy bash`: the project's conda env, git author, SSH key and Claude login. Without `CLAUDY_GIT_*`, Source Control commits with your git config rather than the sandbox placeholder (*Commit author*). Run `claude` in one to use Claude Code next to the editor; it keeps the same conversations and memory as plain `claudy`, as it runs in the same project folder. Inside, `CLAUDY_VSCODE_PORT` tells Claude that port is taken.
+* **Stopping**: press Ctrl-C in the host terminal where `claudy vscode` runs. That ends the editor and every terminal in it, including Claude sessions. Closing the browser tab doesn't: the server keeps terminals alive, so you can reload the page.
+* **Keyboard**: the browser keeps some shortcuts, such as Ctrl-W (closes the tab, where a terminal would delete a word), Ctrl-T and Ctrl-N. Installing the page as an app (*Install* in Chrome or Edge) gives most of them to VS Code.
+* **Downloads and storage**: the image contains the VS Code command-line tool. On first start it downloads the VS Code server from Microsoft, several hundred MB, into a per-project volume, `claude-vscode-<folder>-<hash>`, which also keeps installed extensions. `podman volume rm` it to start over. Extensions are separate per project on purpose: a shared volume would let an extension installed in one project run in all of them.
+* **Licence**: VS Code Server is under Microsoft's licence terms, which `claudy vscode` accepts on your behalf when it starts the server (it prints the link). Telemetry is turned off. If you don't want it in the image, build with `--build-arg WITH_VSCODE=0`.
+* Extensions run inside the container, with the same access as Claude: the project folder, its SSH key, the Claude login and the network. Install only those you trust.
+* **It looks like your local VS Code, but runs in the container.** Accounts you sign in to, Settings Sync, tokens typed into its terminals, and files you drag in all end up inside, within Claude's reach; files you download from it leave the sandbox. If the browser asks whether the page may read the clipboard, block it: keyboard paste still works, and allowing it lets the editor and its extensions read whatever you copy. Keep sync and accounts signed out, and don't open the folder in your desktop VS Code without reviewing `.vscode` (`SECURITY.md`, *VS Code in the browser*).
+* This is not VS Code Dev Containers (see *Security notes*): your desktop VS Code, its SSH agent and git credentials are not involved.
+
 ## Git, GitLab and GitHub (SSH)
 
 Your own SSH keys and git credentials are never visible to the container. Instead, each project folder gets **its own SSH key**, stored in a per-project Podman volume (`claude-ssh-<folder>-<hash>`, mounted at `/root/.ssh`). Containers for different projects cannot see each other's keys.
@@ -251,10 +274,15 @@ Notes:
 
 ### Commit author
 
-Commits made in the container are authored and committed as `Claude Sandbox <claude-sandbox@localhost>` by default. Override it for one run with `CLAUDY_GIT_NAME="Your Name" CLAUDY_GIT_EMAIL=you@example.org claudy`, or change the default by editing the `GIT_*` variables in the `Dockerfile` and rebuilding. While the default is in use, `claudy` warns at start and waits 3 seconds, so you can press Ctrl-C (set both variables, even to the default, to silence it), and Claude warns you once per session before its first commit and tells you how to restart with your own identity; it doesn't change the author itself. Things to weigh:
+Commits made in the container are authored and committed as `Claude Sandbox <claude-sandbox@localhost>` by default. Override it for one run with `CLAUDY_GIT_NAME="Your Name" CLAUDY_GIT_EMAIL=you@example.org claudy` (also with `claudy vscode`, `claudy bash` and the other commands), or change the default by editing the `GIT_*` variables in the `Dockerfile` and rebuilding. While the default is in use, `claudy` warns at start and waits 3 seconds, so you can press Ctrl-C (set both variables, even to the default, to silence it), and Claude warns you once per session before its first commit and tells you how to restart with your own identity; it doesn't change the author itself. For commits you make yourself in a terminal (`claudy bash`), a notice says the same when it opens.
+
+With `claudy vscode`, the default labels only Claude's commits (and those typed in VS Code's terminals); VS Code's Source Control commits with your git config instead. As `/root` isn't kept, set it in the project once: `git config user.name "Your Name"` and `git config user.email you@example.org` (written to `.git/config`, which git on the host uses too). Without it, Source Control refuses to commit and asks who you are, rather than using the placeholder or guessing. `claudy vscode` prints at start which identity Source Control will use. To do this, it gives the placeholder to the terminals and to the Claude Code extension through VS Code's machine settings in the project's VS Code volume (`terminal.integrated.env.linux`, `claudeCode.environmentVariables`), replacing those `GIT_*` entries on every start. With `CLAUDY_GIT_NAME`/`CLAUDY_GIT_EMAIL`, everything uses that identity, as in plain `claudy`.
+
+Things to weigh:
 
 * **Whose name goes on Claude's work.** The default keeps sandbox commits recognisable in `git log` and on the forge, which helps review: you can see what came from the container and check it before merging. With your own name, Claude's commits look like your own work. That can be what you want (you take responsibility for them, and some projects expect a real author), but then rely on the `Co-Authored-By: Claude …` trailer that Claude Code adds, and review as carefully as if you hadn't written them yourself.
 * **Matching commits to your account.** GitHub and GitLab link commits to an account by email. `claude-sandbox@localhost` links to no one. To have commits count as yours without publishing your address, use the forge's no-reply address (shown in your account's email settings). If GitHub is set to block pushes that expose your private email, a commit with that address is rejected.
+* **Claude can read it.** An identity from `CLAUDY_GIT_*` or the project's git config is visible to Claude like any other file or variable in the container, so it can end up in what Claude sends out (see `SECURITY.md`, *Your name and email in the container*).
 * **Keep it out of this repository.** Your name and email are personal data and this repository is public: set `CLAUDY_GIT_NAME`/`CLAUDY_GIT_EMAIL` in a shell alias or your own startup file, not in the `Dockerfile` of a fork you publish.
 * **The environment wins over git config.** The variables override `user.name`/`user.email` in the project's `.git/config` and in any git config Claude writes, so the author can't be changed from inside the container unless Claude sets the variables in a command itself. It is still just text: anyone, Claude included, can put any name on a commit, so treat author fields as labels, not proof.
 * **Set it per project if identities differ.** Exported in your shell, the variables apply to every project you start from it. Use one alias per project (or set them on the command line) if, say, work and personal repositories need different authors.
@@ -534,7 +562,7 @@ Start a project from a git repository (one folder per repository):
   claudy git clone git@github.com:OWNER/REPO.git .  # note the final "."
   claudy                                            # Claude Code in the project
 
-Other commands: claudy bash, claudy jupyter, claudy --ports 8080 <command>
+Other commands: claudy bash, claudy jupyter, claudy vscode, claudy --ports 8080 <command>
 
 Containers for your project run inside claudy, not on this host:
   claudy bash -c 'podman run --rm docker.io/library/hello-world'
@@ -593,7 +621,7 @@ Claude may change the *running* container for its work (install a tool, edit `/e
 * **Keep `~/claudy` out of the mounted project folder** and never run `claudy` from inside it (or from its parent directory), because the project folder is writable by Claude, and `claudy`, `Dockerfile` and `entrypoint.sh` are executed with your rights.
 * **Don't put credentials for this distro into a project**: no `~/.ssh` keys, tokens or `.env` files holding secrets you wouldn't give to Claude.
 * **No SSH keys or git credentials in the distro, and no `ssh` client.** The trim removes `openssh-client` on purpose, and the distro only fetches this repository over HTTPS. Git access for projects belongs to the per-project deploy keys inside `claudy` containers, one key per project and repository. A key, SSH agent, token or credential helper (`~/.git-credentials`) in the distro itself would reach every repository it is allowed on, and would be the first thing an escape from a container finds, which undoes the point of separate keys. Don't reinstall `openssh-client` or add keys there; push and pull projects from inside `claudy`, and maintain this repository (push, pull requests) from your normal environment, not from this distro.
-* **Don't use the distro to run or test your applications** (the guard rails in step 5 help you notice). Project code, test suites, dev servers, notebooks and `make` run in the distro shell would run as your user outside the container, with the access the sandbox is meant to keep from them, and would need the toolchains the trim removed. Run them inside `claudy` (`claudy bash`, `claudy --ports ...`, `claudy jupyter`). The distro is only a launcher: Podman, git for this repository, and an editor.
+* **Don't use the distro to run or test your applications** (the guard rails in step 5 help you notice). Project code, test suites, dev servers, notebooks and `make` run in the distro shell would run as your user outside the container, with the access the sandbox is meant to keep from them, and would need the toolchains the trim removed. Run them inside `claudy` (`claudy bash`, `claudy --ports ...`, `claudy jupyter`, `claudy vscode`). The distro is only a launcher: Podman, git for this repository, and an editor.
 
 ## Updating Claude Code
 
@@ -623,11 +651,15 @@ Risks to be aware of (each explained in `SECURITY.md`):
 
 * **It limits mistakes, it doesn't isolate projects from each other** (*Goal and threat model*). Sessions share the Claude config volume by default, and an escape from any container lands as your user.
 * **On WSL2 the dedicated distro is not a virtual machine**: root in the distro can reach your Windows files, so nothing from a container may get there, and never type the `sudo` password where Claude or code it ran could see it (*WSL2 is not a virtual machine boundary to Windows*).
-* **What you run or open outside the container is outside the sandbox**: scripts, hooks and notebooks from the project, its `.conda_env`, and pages from `--ports` or Jupyter in your browser (*The project folder is writable*, *The project conda env*, *Published ports*).
+* **What you run or open outside the container is outside the sandbox**: scripts, hooks and notebooks from the project, its `.conda_env`, and pages from `--ports`, Jupyter or `claudy vscode` in your browser (*The project folder is writable*, *The project conda env*, *Published ports*).
 * **The image could be swapped under you**: anything running as your user on the host can replace the `claudy` image, and the next start runs it with your project and login. Rebuild from a reviewed checkout (*The image can be replaced without notice*).
+* **Your local network is reachable**: the router, file shares, printers, devices and other computers at home or work, and whatever a VPN on your computer connects to (*Your home or office network*).
+* **For stronger isolation, use a virtual machine**, preferably one per project at a cloud provider, with no cloud permissions and no open ports (*Stronger isolation: a virtual machine, preferably in the cloud*).
+* **Instructions are not enforcement**: plugins, skills, hooks and tool servers you install, files and web pages Claude reads, and its own possibly outdated knowledge can steer it past any instruction; connectors to your other accounts are outside the container entirely (*Plugins, skills, tool servers and connectors*, *What Claude knows or finds online*).
+* **VS Code in the browser** runs extensions with Claude's access and makes it easy to bring credentials, sync or downloads across the boundary (*VS Code in the browser*).
 * **Deploy keys reach beyond the container**: a write key can push to any branch and start CI (*SSH deploy keys reach beyond the container*).
 * **Network access is unrestricted.** Claude, or code it runs, can send anything in `/workspace` to the internet. Do not use this sandbox for data that must not leave the machine, such as Trusted Research Environment data.
-* No ports are published by default. `claudy jupyter` (8888) and `--ports` bind to `127.0.0.1` only.
+* No ports are published by default. `claudy jupyter` (8888), `claudy vscode` (8000) and `--ports` bind to `127.0.0.1` only.
 * Avoid VS Code Dev Containers for this setup: by default they forward your SSH agent and git credentials into the container.
 * To log out everywhere: `podman volume rm claude-config`.
 
@@ -636,4 +668,4 @@ Risks to be aware of (each explained in `SECURITY.md`):
 * **`claude: command not found` / conda errors on start**: check the entrypoint output; a failed `conda env create` stops the container. Delete `.conda_env/` to start from scratch.
 * **The organisation is not offered at login**: check on claude.ai that the browser is signed in with the email your organisation's admin invited, and that the invitation has been accepted.
 * **`jupyter: not found`**: add `notebook` to the project's `environment.yml` (see *Jupyter Notebook*).
-* **Port already in use** (`address already in use` from podman): another `claudy jupyter` or `claudy --ports` session holds it; stop that one or pick another port.
+* **Port already in use** (`address already in use` from podman): another `claudy jupyter`, `claudy vscode` or `claudy --ports` session holds it; stop that one or pick another port.

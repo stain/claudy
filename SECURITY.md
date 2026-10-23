@@ -6,11 +6,26 @@ A short threat model for the Claude Code sandbox in this repository: what it pro
 
 ## Goal and threat model
 
+The intended use is working on **your own code** with Claude, while letting it run reasonable experiments and tests (installing packages, running test suites, starting dev servers, trying things out) without affecting anything else on your computer. It is not meant for working on code, data or input you have reason to distrust; that calls for a higher rung (see *A ladder of isolation* below).
+
 The goal is to limit the damage from **a mistake or misbehaviour of Claude Code or of code it runs**: a bad command, a malicious dependency, or a prompt injection hidden in a file, web page or dataset. The container makes it hard for such things to touch files outside one project folder, your personal SSH keys and git credentials, or other projects' keys.
 
 It is not designed to stop a determined attacker with a kernel exploit, to keep data from leaving the machine, or to make untrusted software safe to run.
 
-**It is not isolation between Claude sessions or code bases.** The purpose is to reduce the blast radius of accidental or misleading instructions and over-eager agents, not to keep projects that must not see each other apart. All sessions run as the same host user on the same kernel and, by default, share one Claude config volume holding every session's transcripts, memory, settings and the login. One session can read and rewrite what another left there (see *The Claude login is exposed to the container*). Real isolation between code bases needs, at the least, separate virtual machines, each with its own keys and logins; a per-project config volume (`CLAUDY_CONFIG`) is only a mitigation.
+**Instructions are not enforcement.** The in-container instructions, this repository's documents and what you tell Claude are guidance that a model weighs against everything else in its context. Plugins, skills, hooks, tool servers, files in the project, web pages, tool output and Claude's own trained knowledge can all steer it elsewhere, and can be written to override earlier instructions. Only what the container itself enforces holds regardless: which folders and volumes are mounted, which ports are published, the seccomp profile and the unprivileged host user. Everything else in this document that relies on Claude behaving well is a reduction of risk, not a guarantee.
+
+**It is not isolation between Claude sessions or code bases.** The purpose is to reduce the blast radius of accidental or misleading instructions and over-eager agents, not to keep projects that must not see each other apart. All sessions run as the same host user on the same kernel and, by default, share one Claude config volume holding every session's transcripts, memory, settings and the login. One session can read and rewrite what another left there (see *The Claude login is exposed to the container*). Real isolation between code bases needs, at the least, separate virtual machines, each with its own keys and logins (see *Stronger isolation: a virtual machine, preferably in the cloud*); a per-project config volume (`CLAUDY_CONFIG`) is only a mitigation.
+
+### A ladder of isolation
+Each rung keeps more out of reach, at more cost and inconvenience. Pick the one the code, the data, the input and your network call for:
+
+1. **Claude Code directly on your computer**: it works with your files, keys, credentials and network, limited by its own permission prompts and settings.
+2. **claudy**: one project folder, its own deploy key, no personal SSH keys or git credentials; still your kernel, your user on the host, your local network and a shared config volume. Meant for your own code.
+3. **claudy in the dedicated WSL distro** (on Windows): as above, with the Windows drives and programs kept out of the automatic reach of the distro (*WSL2 is not a virtual machine boundary to Windows*). A separate config volume per project (`CLAUDY_CONFIG`) narrows the channel between projects.
+4. **A local virtual machine per project**: its own kernel, none of your files or accounts; usually still on your local network.
+5. **A cloud virtual machine per project**: its own kernel, away from your computer and your home or office network, and disposable (*Stronger isolation: a virtual machine, preferably in the cloud*). For untrusted code or input, and for projects that must not see each other.
+
+None of them makes it acceptable to use data that must not leave your machine or institution (*Data can leave the machine*).
 
 ## What is protected
 
@@ -26,6 +41,28 @@ It is not designed to stop a determined attacker with a kernel exploit, to keep 
 
 ### Data can leave the machine
 Network access is unrestricted. Anything the container can read (the project, the SSH key, the Claude login) can be sent anywhere by Claude or by code it runs, for instance after a prompt injection. Project content is also sent to Anthropic as part of normal use. **Do not use this for data that must not leave the machine** (Trusted Research Environment data, patient data, data under a no-transfer agreement).
+
+### Your home or office network
+The container's network access is not limited to the internet. Through your computer it reaches the local network as your computer does: the router's admin page, file shares and network storage, printers, cameras and smart-home devices, media servers, other computers, and at work the internal services and intranet. Many such devices trust anything on the local network, have default or no passwords, or run web interfaces that are rarely updated. Claude, a dependency or a prompt injection can look for them, read what they expose, change their settings, or leave something behind on them that outlives the container. Services on your own computer can be reachable too, on WSL2 including Windows services, depending on how they listen and on WSL's networking mode. Nested containers share the container's network. The connections come from your computer, so devices and logs see them as your own traffic, and a VPN running on the computer carries them into whatever network it connects to.
+
+The sandbox has no filter for this. **Mitigations:** run `claudy` on a computer in a guest network or a separate network segment, not next to systems that matter (work networks, lab instruments, clinical systems); keep devices on your network updated and password-protected; disconnect from work VPNs while working on untrusted material; or use a virtual machine in the cloud (next section).
+
+### Stronger isolation: a virtual machine, preferably in the cloud
+When the risks in this document are more than you want to accept (untrusted code or input, projects that must not see each other, a home or office network you don't want exposed, or broad permission modes running unattended), run Claude in a virtual machine of its own: one per project, or at least one per level of trust. A VM at a cloud provider has its own kernel, so an escape lands in the VM, not on your computer or Windows; it has no route to your home or office network; it holds none of your files, browser sessions or accounts; and it can be deleted and recreated. `claudy` can run inside it to keep the per-project boundaries there. A local VM (Hyper-V, VirtualBox and the like) gives the kernel boundary too, but usually still sits on your local network unless its networking is isolated.
+
+A cloud VM needs its own care:
+* **No cloud permissions on the VM.** Don't attach an instance role, service account or cloud credentials: code on a VM can usually obtain whatever the VM itself was granted from the provider.
+* **No open ports.** Reach it over SSH with a key, or through the provider's console, and forward ports through SSH rather than exposing them. Pages you open from it still run in your browser (*Published ports*).
+* **Only what the project needs**: the deploy key and a Claude login of its own, which the VM holds as the container does; log out when you are done with it.
+* **Data location.** The VM runs in the provider's data centre and region. It does not make data that must not leave your machine or institution acceptable to use; check your institution's rules first.
+* **Network access is still unrestricted** unless you configure outgoing firewall rules, which cloud providers make easier than a home router.
+* **Lifecycle and cost.** Stop or delete the VM when the work is done; disks and snapshots keep its data, and the login, until deleted.
+* **One VM shared by several projects** gives the same separation between them as this sandbox does on your computer, no more.
+
+### Your name and email in the container
+By default the container holds no personal identity: commits carry the `Claude Sandbox` placeholder. Once you give it yours, through `CLAUDY_GIT_NAME`/`CLAUDY_GIT_EMAIL` or, for VS Code's Source Control under `claudy vscode`, through the project's git config, Claude and any code it runs can read it like anything else in the container. From there it is sent to Anthropic whenever it appears in Claude's context, and it can end up in what Claude sends elsewhere: commits it pushes, the text of issues and pull requests, package or dataset metadata, web requests and logs, whether by mistake or after a prompt injection. A forge no-reply address limits what an address leaked this way reveals.
+
+Under `claudy vscode` without `CLAUDY_GIT_*`, Claude's environment keeps the placeholder while Source Control uses your git config. That split labels the commits; it is not a barrier. Claude can commit under the identity it can read, and can change the project's git config, which git on the host uses too. The in-container instructions tell it to do neither unless asked, and not to copy your name or address anywhere. Check the author of commits you didn't make before pushing them, as with any other author field.
 
 ### The Claude login is exposed to the container
 The subscription login lives in the `claude-config` volume, readable by everything in the container. The volume is shared by all projects, so it also holds other projects' transcripts. Each project is mounted at its own path, so Claude Code keeps a separate memory folder per project, but all of them are in the same volume, readable and writable by every session. A compromised session could take the token and use your quota.
@@ -51,6 +88,22 @@ None of this shows up in any project's `git diff`, it survives restarts and imag
 * Check the shared settings now and then, e.g. `claudy bash -c 'cat /claude-config/settings.json; ls /claude-config/plugins /claude-config/skills; cat /claude-config/CLAUDE.md'`, and look for hooks, permission rules, plugins or MCP servers you didn't add.
 * Don't resume an old session after working on untrusted material in another project that shares the volume.
 * Start over with `podman volume rm claude-config` (logs you out and deletes all history) after a session you don't trust.
+
+### Plugins, skills, tool servers and connectors
+Claude Code plugins, skills, subagents, hooks and MCP tool servers are code and instructions you add to every session that loads them. Installed into the shared config volume, they act in every project. Their instructions reach Claude with the same weight as yours or the sandbox's, and one can tell it to disregard earlier rules, to treat a risky action as routine, or to hide what it does. Hooks and tool servers run commands themselves, without Claude deciding to and without a permission prompt. All of it runs with the container's access (the project, its deploy key, the Claude login, the network, and the shared config volume, where it can install more of itself). Plugins and tool servers from a marketplace or package registry can change with any update, so trusting one version is not trusting the next.
+
+**Connectors are outside the container.** Tool servers attached to your Claude account (for example mail, calendar, document storage or chat) run on Anthropic's or the provider's side, with your account's access to those services. The sandbox does not limit them: through them, Claude can read and send data, or act as you, in services the container has no other route to, whether you asked for that or a prompt injection did. Text they return (an email, a shared document, a chat message) is untrusted input like a web page.
+
+**Mitigations:**
+* Install only plugins, skills and tool servers you have reason to trust, from sources you know, and review what they contain, including their hooks. Prefer pinned versions over ones that update themselves.
+* Try new ones in a project with its own config volume (`CLAUDY_CONFIG`), not in the shared one.
+* Turn off connectors a project doesn't need, especially for sessions that handle untrusted input; with them on, a prompt injection in the project can reach those accounts.
+* Look for plugins, hooks and tool servers you didn't add (*Cross-talk and leakage through the shared config volume*).
+
+### What Claude knows or finds online
+Claude's trained knowledge can be outdated or wrong: package versions with known vulnerabilities, deprecated or unsafe defaults, APIs that changed, or package names that don't exist, which an attacker can register under that name. What it finds online (search results, documentation, issues, forum answers, package READMEs, pages it fetches) is untrusted input and can carry a prompt injection aimed at coding agents, or simply bad advice. Commands, dependencies and configuration that arrive this way run in the container with its access, and Claude can also learn of ways around a restriction that you never suggested (see *This document is public*).
+
+**Mitigations:** review the dependencies Claude adds (does the package exist, is it the one you meant, is the version current), prefer pinned versions and lock files, keep permission prompts on for network fetches and installs when a project handles untrusted material, and treat "the documentation says to run this" as a claim to check, not a reason.
 
 ### The project folder is writable and trusted by you later
 Claude can change anything in `/workspace`: scripts, `Makefile`, notebooks, `.git/hooks`, `environment.yml`, IDE settings. If you later run or open those *outside* the container (a git hook, `make`, a Jupyter notebook on the host, VS Code tasks), the sandbox no longer applies. Review changes (`git diff`, including hooks) before running anything outside.
@@ -104,7 +157,7 @@ Inner containers share the outer container's network (`--network=host` inside me
 Nested mode adds `/dev/fuse` (the entrypoint then switches Podman to `overlay` on `fuse-overlayfs`), SELinux labelling disabled, and a persistent per-project volume for inner images. FUSE and disabled labelling enlarge the kernel attack surface further. `claudy` refuses it on a WSL distro that still has Windows drives or interop, but this check is a guard against mistakes, not a security boundary (`CLAUDY_ALLOW_UNSAFE_NESTED=1` overrides it). Nested mode has not been verified end to end. Never mount a host Podman socket instead: it allows mounting any host path.
 
 ### Image and supply chain
-The image is built from a floating `node:22-slim` tag, the latest Miniforge installer (downloaded and run without checksum verification), and unpinned `npm install -g @anthropic-ai/claude-code`. Conda packages come from `conda-forge` and `bioconda` without hash pinning (the channel allowlist does not cover `environment.yml` or `pip:`, see *The project conda env* above), and nested containers pull images from Docker Hub without verification. Packages Claude installs at runtime (`apt`, `pip`, `npm`) are further unpinned inputs. A compromise of any of these ends up inside the container, and inside your project through code that environment runs. Pin versions and checksums for stricter use (see *Future work* in `CLAUDE.md`).
+The image is built from a floating `node:22-slim` tag, the latest Miniforge installer (downloaded and run without checksum verification), unpinned `npm install -g @anthropic-ai/claude-code` and, unless built without it, the latest VS Code command-line tool (also without checksum verification), which downloads the VS Code server from Microsoft on the first `claudy vscode` start. Conda packages come from `conda-forge` and `bioconda` without hash pinning (the channel allowlist does not cover `environment.yml` or `pip:`, see *The project conda env* above), and nested containers pull images from Docker Hub without verification. Packages Claude installs at runtime (`apt`, `pip`, `npm`) are further unpinned inputs. A compromise of any of these ends up inside the container, and inside your project through code that environment runs. Pin versions and checksums for stricter use (see *Future work* in `CLAUDE.md`).
 
 ### The image can be replaced without notice
 `claudy` starts whatever image is stored under its name in your user's own Podman storage. That storage belongs to your user, so anything running as your user on the host (a process after a container escape, a tool or script you ran on the distro, a tampered shell startup file) can put a different image under that name, or point `claudy` at another image. Nothing visible changes. The next start then runs that image with your project folder, the Claude login and the project's deploy key mounted, and with whatever instructions, entrypoint and Claude Code version it contains. A session inside the container cannot do this on its own: nested Podman keeps its images in separate storage, so replacing the host's image needs an escape or something running outside the container first.
@@ -132,8 +185,8 @@ If a registry image is offered, it should be optional and pinned: the expected d
 ### Weaker defaults
 The container uses Podman's default capability set and its default seccomp profile, with vsock blocked (see above); there is no `--cap-drop=ALL`, `no-new-privileges`, read-only root filesystem or resource limits (CPU, memory, processes). A runaway process, or a nested build on `vfs` storage, can exhaust the host's CPU, memory or disk. The container runs as in-container root, which rootless Podman maps to your user. A non-root user inside would add little on its own: it would map to the same host user, and any process can still create a user namespace with full capabilities inside it (nested Podman relies on that). Possible next steps are `no-new-privileges`, dropping unused capabilities and a separate host subuid range per project (*Future work* in `CLAUDE.md`).
 
-### Published ports (Jupyter, `--ports`)
-No ports are published by default. `claudy jupyter` (8888) and `claudy --ports ...` bind the listed ports to `127.0.0.1` on the host, but on WSL2 `localhost` is forwarded to Windows, so any local Windows process or browser tab can reach them. Jupyter uses a token, and anyone with it can run code in the container. A dev server on a `--ports` port usually has no authentication at all, so anything local, including a malicious web page in your browser making requests to `localhost`, can talk to it. Publish ports only for the session that needs them.
+### Published ports (Jupyter, VS Code, `--ports`)
+No ports are published by default. `claudy jupyter` (8888), `claudy vscode` (8000) and `claudy --ports ...` bind the listed ports to `127.0.0.1` on the host, but on WSL2 `localhost` is forwarded to Windows, so any local Windows process or browser tab can reach them. Jupyter and VS Code use a token, and anyone with it can run code in the container. A dev server on a `--ports` port usually has no authentication at all, so anything local, including a malicious web page in your browser making requests to `localhost`, can talk to it. Publish ports only for the session that needs them.
 
 The other direction matters as much: **opening a page served from the container runs Claude-written (or dependency-supplied) code in your own browser, outside the sandbox**, with that browser's network position and logins. Such a page can:
 
@@ -143,6 +196,25 @@ The other direction matters as much: **opening a page served from the container 
 * exploit a browser vulnerability, which escapes the claudy sandbox entirely.
 
 Use a **separate browser profile** (or a separate browser) for pages from `claudy`: not logged into anything, without a password manager or extensions, and not used for anything else. Don't open downloads from such pages, close the page when done, and don't run `claudy jupyter` for one project while browsing an untrusted dev server from another. Where possible, test from inside the container instead (`curl`, or a headless browser installed in the project's environment).
+
+VS Code in the browser (`claudy vscode`) is such a page too, and a large one; see the next section.
+
+### VS Code in the browser (`claudy vscode`)
+Claude sessions started in its terminals have the same sandbox as plain `claudy`. The editor adds risks of its own, in three places.
+
+**In your browser.** The editor, and every extension's views and previews (Markdown, HTML, notebook output), run as a page in your browser and render files Claude wrote. VS Code isolates extension views from each other, but they share the browser and profile you open it in. The URL carries the access token: whoever has it, from browser history, a synced profile, a screen share or a copied link, gets terminals in the container until it restarts, and the server keeps running while the tab is closed. After the first visit the browser keeps the token in a cookie that the page's scripts can read, and browsers share cookies between all ports of the same host name. On plain `localhost`, a page from a dev server, Jupyter or another project's VS Code in the same profile could therefore read or use it, and reach this project's editor. `claudy vscode` prints a URL with a host name of its own per project under `.localhost` to keep that cookie apart; use that URL rather than `localhost`. If you allow the page to read the clipboard (the browser asks), the editor can read what you copied, on your machine and from other programs, whenever it asks, and extensions in the container can request it through the editor: passwords from a password manager, tokens, anything copied while the tab is open. Pasting with the keyboard generally works without that permission, so prefer blocking it. Installing the page as an app does so in the browser profile you install it from. Browser extensions and password managers in that profile can read the page or fill your passwords into it. Downloading a file from the editor puts a file Claude could have written onto your machine, outside the sandbox, and dragging or pasting files and text into the editor puts them in the container, within Claude's reach and the network's.
+
+The token does not protect against code inside the container: everything there, Claude and the editor's server included, runs as one user, so that code can read the token. It gains little from it, as it can already change the files and run commands; through the editor's own channel for its terminals, it can also open files and views in your editor window without the token. Other users and nested containers are kept out: the token and the editor's internal channels are readable by that one user only, nested containers share the network and can reach the port, but not the token unless it is mounted into them, and the Claude Code extension's local connections for the editor need a token of their own, kept in the Claude config volume. Keeping the token from Claude needs the editor in a container of its own or a separate user for Claude's terminals; both are planned, not implemented (*Future work* in `CLAUDE.md`).
+
+**Inside the container.** Extensions run there with Claude's access (project, deploy key, Claude login, network). They are kept in a per-project volume that, like `.conda_env`, persists between sessions and does not show up in `git diff`; something in the container can change them, and they then run each time you open the editor. Marketplace extensions update themselves, so an extension you trusted can change under you. Settings, tasks, launch configurations and recommended extensions in the project's `.vscode` folder can be written by Claude, and the editor acts on them once you trust the folder.
+
+**What you might do without thinking about the container.** The editor looks and behaves like your local VS Code, which makes it easy to forget where it runs:
+* Signing in (GitHub, Microsoft, an AI assistant, a cloud or database extension), or typing a password or token into a terminal or a git prompt, stores those credentials in the container or its VS Code volume, readable by Claude and anything it runs. The deploy key is the only credential the sandbox is meant to hold.
+* Settings Sync connects the container's editor to your account: settings, keybindings, snippets and extensions flow both ways between it and your other VS Code installations, so changes made in the container can reach machines outside it.
+* Opening the same project folder in your desktop VS Code, on the host or through a WSL connection, runs the project's `.vscode` configuration, recommended extensions and interpreter settings (which may point into `.conda_env`) outside the sandbox. So does starting Claude Code from that editor: it then runs on the host, with none of the container's limits.
+* Commands from extension pop-ups, tutorials or "copy to terminal" suggestions run in the container, which is the right place, but they still run with its access; the reverse, pasting something from the editor into a terminal on the host, leaves the sandbox.
+
+Use the separate browser profile, without extensions, password manager or sync, add only extensions you trust, keep accounts and Settings Sync signed out, stop `claudy vscode` when you're done, and remove the VS Code volume when in doubt. Don't open the folder in a desktop editor without reviewing `.vscode` first.
 
 ### Human factors
 The dedicated distro is only a launcher; running project code there (tests, dev servers, `make`) bypasses the container entirely. Guard rails make that harder to do by accident (README, *Guard rails against running code on the distro*): apt refuses SSH and development tools, the shell marks itself as the host, and `/tmp` and `/dev/shm` are `noexec`. They do not stop a user with `sudo`. The sandbox makes broad permission modes (such as auto-approving tool use) less risky, not safe. Don't put secrets you wouldn't give Claude into a project (`.env`, tokens, keys), and don't paste the `sudo` password into any session.
@@ -170,7 +242,12 @@ The dedicated distro is only a launcher; running project code there (tests, dev 
 | | Supply-chain compromise of the image or conda packages |
 | | Replacement of the local `claudy` image by something running as your user on the host |
 | | Isolation between Claude sessions or code bases that must not see each other (shared config volume, same user and kernel) |
-| | Tampering in `.conda_env`, which persists between sessions and is not in `git diff` |
+| | Tampering in `.conda_env` or the project's VS Code volume, which persist between sessions and are not in `git diff` |
+| | Access to your home or office network (router, file shares, printers, devices, other computers, VPNs) |
+| | Plugins, skills, hooks and tool servers you install, and connectors that act in your other accounts |
+| | Prompt injection or bad advice from the web, and outdated or wrong model knowledge |
+| | Credentials, sync or downloads you bring into or out of `claudy vscode` |
+| | Your name and email once given to the container (`CLAUDY_GIT_*`, the project's git config): readable by Claude, and it can commit under them |
 | | Pages from the container opened in your browser (they run outside the sandbox, with your browser's logins and `localhost` access) |
 
 ## Reporting

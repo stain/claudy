@@ -50,11 +50,16 @@ ENV PATH=/workspace/.conda_env/bin:$CONDA_DIR/bin:$PATH
 
 # Interactive shells (claudy bash, podman exec -it): define the `conda` function and
 # activate the project env if it exists. Not `conda init`, which would activate base.
-# The entrypoint does the same for the started command.
+# The entrypoint does the same for the started command. Login shells (VS Code builds its
+# terminal and extension environment from one) inherit CONDA_PREFIX but get PATH reset by
+# /etc/profile, so also activate when the env's bin is missing from PATH.
 RUN printf '%s\n' \
       '. /opt/conda/etc/profile.d/conda.sh' \
-      'if [ -d /workspace/.conda_env/conda-meta ] && [ "${CONDA_PREFIX:-}" != /workspace/.conda_env ]; then' \
-      '    conda activate /workspace/.conda_env' \
+      'if [ -d /workspace/.conda_env/conda-meta ]; then' \
+      '    case "${CONDA_PREFIX:-}:$PATH:" in' \
+      '        /workspace/.conda_env:*:/workspace/.conda_env/bin:*) ;;' \
+      '        *) conda activate /workspace/.conda_env ;;' \
+      '    esac' \
       'fi' >> /etc/bash.bashrc \
  # The entrypoint's activation already set CONDA_PROMPT_MODIFIER, but root's own
  # .bashrc resets PS1 afterwards, so re-add the "(env)" prefix there.
@@ -62,6 +67,15 @@ RUN printf '%s\n' \
       'case "${CONDA_PROMPT_MODIFIER:-}" in "") ;; *) case "$PS1" in *"$CONDA_PROMPT_MODIFIER"*) ;; *) PS1="${CONDA_PROMPT_MODIFIER}${PS1}" ;; esac ;; esac' >> /root/.bashrc
 
 RUN npm install -g @anthropic-ai/claude-code
+
+# VS Code CLI for `claudy vscode` (VS Code in the browser, served from the container).
+# Not on PATH: VS Code's own terminals provide a `code` command. WITH_VSCODE=0 leaves it out.
+ARG WITH_VSCODE=1
+RUN if [ "$WITH_VSCODE" = 1 ]; then \
+      mkdir -p /opt/vscode \
+      && curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-$(case "$(uname -m)" in aarch64) echo arm64 ;; *) echo x64 ;; esac)" \
+         | tar -xz --no-same-owner -C /opt/vscode code ; \
+    fi
 
 # Commit identity. Override per run with CLAUDY_GIT_NAME / CLAUDY_GIT_EMAIL (see claudy)
 ENV GIT_AUTHOR_NAME="Claude Sandbox" \
@@ -78,7 +92,13 @@ RUN mkdir -p /etc/ssh/ssh_config.d \
 
 COPY etc-claude-code/CLAUDE.md /etc/claude-code/CLAUDE.md
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY vscode-serve.sh /usr/local/bin/vscode-serve
+COPY git-identity-notice.sh /usr/local/bin/claudy-git-identity-notice
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/vscode-serve /usr/local/bin/claudy-git-identity-notice \
+ # Interactive terminals (claudy bash, VS Code): warn about the placeholder commit identity.
+ # Only with a TTY, so Claude's own non-interactive shells stay quiet.
+ && printf '%s\n' \
+      'case "$-" in *i*) [ -t 2 ] && claudy-git-identity-notice ;; esac' >> /etc/bash.bashrc
 
 # Credentials and settings live in a named volume, not in the workspace
 ENV SHELL=/bin/bash \
