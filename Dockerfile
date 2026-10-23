@@ -50,11 +50,16 @@ ENV PATH=/workspace/.conda_env/bin:$CONDA_DIR/bin:$PATH
 
 # Interactive shells (claudy bash, podman exec -it): define the `conda` function and
 # activate the project env if it exists. Not `conda init`, which would activate base.
-# The entrypoint does the same for the started command.
+# The entrypoint does the same for the started command. Login shells (VS Code builds its
+# terminal and extension environment from one) inherit CONDA_PREFIX but get PATH reset by
+# /etc/profile, so also activate when the env's bin is missing from PATH.
 RUN printf '%s\n' \
       '. /opt/conda/etc/profile.d/conda.sh' \
-      'if [ -d /workspace/.conda_env/conda-meta ] && [ "${CONDA_PREFIX:-}" != /workspace/.conda_env ]; then' \
-      '    conda activate /workspace/.conda_env' \
+      'if [ -d /workspace/.conda_env/conda-meta ]; then' \
+      '    case "${CONDA_PREFIX:-}:$PATH:" in' \
+      '        /workspace/.conda_env:*:/workspace/.conda_env/bin:*) ;;' \
+      '        *) conda activate /workspace/.conda_env ;;' \
+      '    esac' \
       'fi' >> /etc/bash.bashrc \
  # The entrypoint's activation already set CONDA_PROMPT_MODIFIER, but root's own
  # .bashrc resets PS1 afterwards, so re-add the "(env)" prefix there.
