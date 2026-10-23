@@ -3,6 +3,7 @@
 #   claudy               Claude Code
 #   claudy <cmd> [args]  any command, e.g. bash, snakemake --cores 4
 #   claudy jupyter       Jupyter Notebook on http://localhost:8888
+#   claudy vscode        VS Code in the browser on http://localhost:8000 (CLAUDY_VSCODE_PORT)
 #   claudy pubkey        print this project's SSH public key
 #
 # Options (before the command):
@@ -74,7 +75,7 @@ done
 # after a git pull: this script takes effect at once, the image only after a rebuild.
 repo=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 if built=$(podman image inspect --format '{{.Created.Unix}}' "$IMAGE" 2>/dev/null); then
-  for f in Dockerfile entrypoint.sh etc-claude-code/CLAUDE.md; do
+  for f in Dockerfile entrypoint.sh vscode-serve.sh etc-claude-code/CLAUDE.md; do
     if [ -f "$repo/$f" ] && [ "$(stat -c %Y "$repo/$f")" -gt "$built" ]; then
       echo "claudy: $f changed since image '$IMAGE' was built; rebuild it: podman build -t $IMAGE $repo" >&2
       break
@@ -186,6 +187,18 @@ fi
 if [ "${1:-}" = jupyter ]; then
   ports+=(8888)
   set -- jupyter notebook --ip=0.0.0.0 --no-browser --allow-root
+fi
+
+# VS Code server and extensions persist in a per-project volume: a shared one would let
+# an extension installed in one project run in another.
+if [ "${1:-}" = vscode ]; then
+  vscode_port=${CLAUDY_VSCODE_PORT:-8000}
+  if ! [[ $vscode_port =~ ^[0-9]+$ ]] || [ "$vscode_port" -lt 1024 ] || [ "$vscode_port" -gt 65535 ]; then
+    echo "claudy: invalid CLAUDY_VSCODE_PORT '$vscode_port' (expected 1024-65535)" >&2; exit 1
+  fi
+  ports+=("$((10#$vscode_port))")
+  opts+=(-v "claude-vscode-$project_id":/root/.vscode-claudy)
+  set -- vscode-serve "$((10#$vscode_port))"
 fi
 
 # Published ports: host loopback only, same number inside and out. CLAUDY_PORTS tells

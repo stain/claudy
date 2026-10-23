@@ -63,6 +63,15 @@ RUN printf '%s\n' \
 
 RUN npm install -g @anthropic-ai/claude-code
 
+# VS Code CLI for `claudy vscode` (VS Code in the browser, served from the container).
+# Not on PATH: VS Code's own terminals provide a `code` command. WITH_VSCODE=0 leaves it out.
+ARG WITH_VSCODE=1
+RUN if [ "$WITH_VSCODE" = 1 ]; then \
+      mkdir -p /opt/vscode \
+      && curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-$(case "$(uname -m)" in aarch64) echo arm64 ;; *) echo x64 ;; esac)" \
+         | tar -xz --no-same-owner -C /opt/vscode code ; \
+    fi
+
 # Commit identity. Override per run with CLAUDY_GIT_NAME / CLAUDY_GIT_EMAIL (see claudy)
 ENV GIT_AUTHOR_NAME="Claude Sandbox" \
     GIT_AUTHOR_EMAIL="claude-sandbox@localhost" \
@@ -78,7 +87,8 @@ RUN mkdir -p /etc/ssh/ssh_config.d \
 
 COPY etc-claude-code/CLAUDE.md /etc/claude-code/CLAUDE.md
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY vscode-serve.sh /usr/local/bin/vscode-serve
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/vscode-serve
 
 # Credentials and settings live in a named volume, not in the workspace
 ENV SHELL=/bin/bash \
