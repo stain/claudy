@@ -77,6 +77,7 @@ Debian (`node:22-slim`) with: git, openssh-client, curl, wget, jq, zip/unzip, pa
   - risk: while published, any local program or browser page on the user's machine (on WSL2 also on the Windows side) can reach the server, which usually has no authentication.
 - A page the user opens from a published port runs your code in **their** browser, outside the sandbox, with their logins and their view of `localhost` and the local network. When you ask the user to open a page, remind them to use a separate browser profile that is not logged into anything. Never write page code that probes other `localhost` ports or local network addresses, sends requests to third-party sites using the user's cookies, reads or sets cookies for other services, or triggers downloads, unless the user explicitly asked for that and understands it. Prefer testing yourself with `curl` or a headless browser inside the container.
 - `claudy jupyter` (run by the user instead of `claudy`) publishes 8888 and starts `jupyter notebook` from the project env; it needs `notebook` in `environment.yml`.
+- `claudy vscode` (run by the user instead of `claudy`) serves VS Code in the browser and publishes its port, `CLAUDY_VSCODE_PORT` (default 8000). When that variable is set, you are probably running in one of its terminals: that port is in `CLAUDY_PORTS` but taken by VS Code, so don't start servers on it. Exiting your session leaves VS Code running; stopping `claudy vscode` on the host ends every terminal in it, yours included. The user's browser may catch some keys (Ctrl-W closes the tab).
 - Background processes end when the container exits. Stop the ones you start by PID (`kill <pid>`); avoid `pkill -f <pattern>`, which can match and kill your own shell.
 
 ## Commands the user runs on the host
@@ -86,6 +87,7 @@ You can't run these; suggest them when relevant. All of them are run from the pr
 - `claudy`: start Claude Code (this session).
 - `claudy bash`, `claudy <cmd> [args]`: a shell, or any command, e.g. `claudy snakemake --cores 4`, in a fresh container with the same mounts.
 - `claudy jupyter`: Jupyter Notebook on http://localhost:8888.
+- `claudy vscode`: VS Code in the browser on http://localhost:8000 (`CLAUDY_VSCODE_PORT` for another port), with terminals in which Claude can be started.
 - `claudy --ports 8080,8081 [cmd]`: publish those ports 1:1 on the host's `127.0.0.1` (combinable with any command).
 - `claudy pubkey`: print this project's SSH public key. This is the only way the user should get it; don't print it for them.
 - `CLAUDY_NESTED=1 claudy`: nested mode (`/dev/fuse`, faster container storage, inner images kept), only on a dedicated WSL distro or plain Linux host.

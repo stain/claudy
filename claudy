@@ -197,7 +197,8 @@ if [ "${1:-}" = vscode ]; then
     echo "claudy: invalid CLAUDY_VSCODE_PORT '$vscode_port' (expected 1024-65535)" >&2; exit 1
   fi
   ports+=("$((10#$vscode_port))")
-  opts+=(-v "claude-vscode-$project_id":/root/.vscode-claudy)
+  opts+=(-v "claude-vscode-$project_id":/root/.vscode-claudy
+         -e CLAUDY_VSCODE_PORT="$((10#$vscode_port))")
   set -- vscode-serve "$((10#$vscode_port))"
 fi
 
