@@ -93,7 +93,12 @@ RUN mkdir -p /etc/ssh/ssh_config.d \
 COPY etc-claude-code/CLAUDE.md /etc/claude-code/CLAUDE.md
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY vscode-serve.sh /usr/local/bin/vscode-serve
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/vscode-serve
+COPY git-identity-notice.sh /usr/local/bin/claudy-git-identity-notice
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/vscode-serve /usr/local/bin/claudy-git-identity-notice \
+ # Interactive terminals (claudy bash, VS Code): warn about the placeholder commit identity.
+ # Only with a TTY, so Claude's own non-interactive shells stay quiet.
+ && printf '%s\n' \
+      'case "$-" in *i*) [ -t 2 ] && claudy-git-identity-notice ;; esac' >> /etc/bash.bashrc
 
 # Credentials and settings live in a named volume, not in the workspace
 ENV SHELL=/bin/bash \

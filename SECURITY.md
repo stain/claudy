@@ -27,6 +27,11 @@ It is not designed to stop a determined attacker with a kernel exploit, to keep 
 ### Data can leave the machine
 Network access is unrestricted. Anything the container can read (the project, the SSH key, the Claude login) can be sent anywhere by Claude or by code it runs, for instance after a prompt injection. Project content is also sent to Anthropic as part of normal use. **Do not use this for data that must not leave the machine** (Trusted Research Environment data, patient data, data under a no-transfer agreement).
 
+### Your name and email in the container
+By default the container holds no personal identity: commits carry the `Claude Sandbox` placeholder. Once you give it yours, through `CLAUDY_GIT_NAME`/`CLAUDY_GIT_EMAIL` or, for VS Code's Source Control under `claudy vscode`, through the project's git config, Claude and any code it runs can read it like anything else in the container. From there it is sent to Anthropic whenever it appears in Claude's context, and it can end up in what Claude sends elsewhere: commits it pushes, the text of issues and pull requests, package or dataset metadata, web requests and logs, whether by mistake or after a prompt injection. A forge no-reply address limits what an address leaked this way reveals.
+
+Under `claudy vscode` without `CLAUDY_GIT_*`, Claude's environment keeps the placeholder while Source Control uses your git config. That split labels the commits; it is not a barrier. Claude can commit under the identity it can read, and can change the project's git config, which git on the host uses too. The in-container instructions tell it to do neither unless asked, and not to copy your name or address anywhere. Check the author of commits you didn't make before pushing them, as with any other author field.
+
 ### The Claude login is exposed to the container
 The subscription login lives in the `claude-config` volume, readable by everything in the container. The volume is shared by all projects, so it also holds other projects' transcripts. Each project is mounted at its own path, so Claude Code keeps a separate memory folder per project, but all of them are in the same volume, readable and writable by every session. A compromised session could take the token and use your quota.
 
@@ -173,6 +178,7 @@ The dedicated distro is only a launcher; running project code there (tests, dev 
 | | Replacement of the local `claudy` image by something running as your user on the host |
 | | Isolation between Claude sessions or code bases that must not see each other (shared config volume, same user and kernel) |
 | | Tampering in `.conda_env` or the project's VS Code volume, which persist between sessions and are not in `git diff` |
+| | Your name and email once given to the container (`CLAUDY_GIT_*`, the project's git config): readable by Claude, and it can commit under them |
 | | Pages from the container opened in your browser (they run outside the sandbox, with your browser's logins and `localhost` access) |
 
 ## Reporting
