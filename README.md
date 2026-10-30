@@ -119,6 +119,8 @@ claudy --ports 8080,5173     # Claude Code, with these ports reachable on http:/
 
 The project's conda environment (`/workspace/.conda_env/bin`) is on `PATH` for every command, so there is no need for `conda activate`. The entrypoint and interactive shells (via `/etc/bash.bashrc`) also activate it when it exists, and `conda activate` works in those shells.
 
+Ctrl-Z suspends Claude Code to a bash prompt inside the container (not your host shell): `fg` brings it back, and leaving Claude ends the container as before. This also applies to `claudy claude ...`, for example `claudy claude --continue`. Claude runs as a job of that shell because the container's first process can't be suspended; a host shell is one Ctrl-Z can't reach, so open another terminal for that.
+
 ## Conda environment
 
 `environment.yml` lives in the project, not in this repository. On each start the entrypoint:
