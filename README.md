@@ -54,6 +54,8 @@ cd ~/claudy
 podman build -t claudy .
 ```
 
+Or run `make` in `~/claudy`, which does the same build after two checks: it stops with a hint when `podman` isn't installed, and on WSL it warns when the distro doesn't follow *Where to run it* (Windows drives mounted, interop enabled, or the repository on a Windows drive). The warning doesn't stop the build, as an everyday distro is a supported setup. `make rebuild` is the full rebuild from *Updating Claude Code*; pass build arguments with `make BUILD_ARGS='--build-arg WITH_VSCODE=0'`. The dedicated distro has no `make` (its apt pin refuses it, see *Guard rails*), so use `podman build` there.
+
 The repository is public, so the HTTPS clone needs no credentials (use it rather than `git@github.com:...`, which needs an SSH key). Update later with `git -C ~/claudy pull`, then rebuild the image. The pulled `claudy` takes effect at once, the image only after the rebuild; `claudy` warns at start when `Dockerfile`, `entrypoint.sh` or `etc-claude-code/CLAUDE.md` is newer than the image.
 
 The `Dockerfile` uses a fully qualified base image (`docker.io/library/node:22-slim`), so Podman needs no registry configuration. The build installs git, ssh, jq, zip/unzip, patch, build tools and an editor alongside Claude Code and Miniforge, and takes a few minutes the first time.
@@ -631,7 +633,7 @@ Claude Code is installed when the image is built. Updates made at runtime are lo
 
 ```bash
 cd ~/claudy
-podman build --pull --no-cache -t claudy .
+podman build --pull --no-cache -t claudy .   # or: make rebuild
 ```
 
 Your login is kept, as it lives in the `claude-config` volume.
