@@ -94,6 +94,7 @@ COPY etc-claude-code/CLAUDE.md /etc/claude-code/CLAUDE.md
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY vscode-serve.sh /usr/local/bin/vscode-serve
 COPY git-identity-notice.sh /usr/local/bin/claudy-git-identity-notice
+COPY claude-shell.bashrc /usr/local/share/claudy/claude-shell.bashrc
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/vscode-serve /usr/local/bin/claudy-git-identity-notice \
  # Interactive terminals (claudy bash, VS Code): warn about the placeholder commit identity.
  # Only with a TTY, so Claude's own non-interactive shells stay quiet.
@@ -107,7 +108,9 @@ ENV SHELL=/bin/bash \
 # claudy mounts the project at /projects/<folder>-<hash> only if this label says the
 # entrypoint links /workspace to it; older images get the project at /workspace.
 LABEL org.claudy.project-dir=1
+# claudy runs `claude ...` through claude-shell.bashrc only if this label says it exists.
+LABEL org.claudy.claude-shell=1
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-# Absolute path: /workspace/.conda_env/bin is first on PATH, so a `claude` there would win
-CMD ["/usr/local/bin/claude"]
+# Claude as a job of an interactive bash, not PID 1, so Ctrl-Z can suspend it
+CMD ["/bin/bash", "--rcfile", "/usr/local/share/claudy/claude-shell.bashrc", "-i"]

@@ -75,7 +75,7 @@ done
 # after a git pull: this script takes effect at once, the image only after a rebuild.
 repo=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 if built=$(podman image inspect --format '{{.Created.Unix}}' "$IMAGE" 2>/dev/null); then
-  for f in Dockerfile entrypoint.sh vscode-serve.sh git-identity-notice.sh etc-claude-code/CLAUDE.md; do
+  for f in Dockerfile entrypoint.sh vscode-serve.sh git-identity-notice.sh claude-shell.bashrc etc-claude-code/CLAUDE.md; do
     if [ -f "$repo/$f" ] && [ "$(stat -c %Y "$repo/$f")" -gt "$built" ]; then
       echo "claudy: $f changed since image '$IMAGE' was built; rebuild it: podman build -t $IMAGE $repo" >&2
       break
@@ -197,6 +197,14 @@ fi
 
 if [ "${1:-}" = pubkey ]; then
   set -- cat /root/.ssh/id_ed25519.pub
+fi
+
+# Claude as a job of an interactive bash in the container, not PID 1, so Ctrl-Z
+# suspends it to that shell (images without the label run it directly)
+if [ "${1:-}" = claude ] \
+   && [ "$(podman image inspect --format '{{index .Config.Labels "org.claudy.claude-shell"}}' "$IMAGE" 2>/dev/null)" = 1 ]; then
+  shift
+  set -- /bin/bash --rcfile /usr/local/share/claudy/claude-shell.bashrc -i -s -- "$@"
 fi
 
 if [ "${1:-}" = jupyter ]; then
